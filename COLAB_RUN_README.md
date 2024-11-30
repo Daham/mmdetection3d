@@ -5,9 +5,14 @@ This repository provides a complete workflow for setting up **MMDetection3D**, p
 
 ---
 
-## **1. KITTI Dataset Folder Structure**
+## **1. KITTI Dataset Folder Structure and Download**
 
-To ensure compatibility with **MMDetection3D**, the KITTI dataset must follow this structure:
+### **Dataset Download**
+1. Visit the official KITTI dataset website: [KITTI Dataset](http://www.cvlibs.net/datasets/kitti/).
+2. Download the following components:
+   - **3D Object Detection Data**: Contains `image_2/`, `label_2/`, `velodyne/`, and `calib/` folders.
+   - Optionally, download `planes/` for plane information.
+3. Extract the downloaded files into a directory, ensuring the following structure:
 
 ```plaintext
 KITTI/
@@ -23,8 +28,6 @@ KITTI/
 │   ├── calib/             # Calibration files
 │   └── planes/            # Optional plane information (if available)
 ```
-
-Ensure all file names (e.g., `000000.bin`, `000000.txt`) align with the KITTI dataset's naming conventions.
 
 ---
 
@@ -97,7 +100,159 @@ python tools/test.py configs/second/second_hv_secfpn_8xb6-80e_kitti-3d-car.py \
 
 ---
 
-## **3. Code Modifications**
+## **3. Full Colab Notebook**
+
+Save the following code as `full-process-colab.ipynb` to automate the entire process in Google Colab:
+
+```python
+{
+ "cells": [
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Import the Google Drive module from Google Colab to interact with Google Drive
+",
+    "from google.colab import drive
+",
+    "
+",
+    "# Mount your Google Drive to access files stored in it
+",
+    "drive.mount('/content/drive')
+",
+    "
+",
+    "# Import PyTorch to verify the installed version
+",
+    "import torch
+",
+    "
+",
+    "# Print the version of PyTorch installed in the Colab environment
+",
+    "print(f"PyTorch version: {torch.__version__}")
+",
+    "
+",
+    "# Uninstall existing versions of PyTorch, torchvision, and torchaudio to ensure a clean environment
+",
+    "!pip uninstall -y torch torchvision torchaudio
+",
+    "
+",
+    "# Install specific versions of PyTorch, torchvision, and torchaudio compatible with CUDA 11.8
+",
+    "!pip install torch==2.0.0+cu118 torchvision==0.15.1+cu118 torchaudio==2.0.1 --extra-index-url https://download.pytorch.org/whl/cu118
+",
+    "
+",
+    "# Install MMEngine, the engine that supports OpenMMLab frameworks like MMDetection3D
+",
+    "!pip install mmengine==0.9.1
+",
+    "
+",
+    "# Install MMCV (OpenMMLab's foundational library) with CUDA 11.8 and PyTorch 2.0.0 support
+",
+    "!pip install mmcv==2.0.0 -f https://download.openmmlab.com/mmcv/dist/cu118/torch2.0.0/index.html
+",
+    "
+",
+    "# Install MMDetection (2D object detection framework by OpenMMLab)
+",
+    "!pip install mmdet==3.0.0
+",
+    "
+",
+    "# Install MMDetection3D (3D object detection framework by OpenMMLab)
+",
+    "!pip install mmdet3d==1.1.0
+",
+    "
+",
+    "# Clone the MMDetection3D GitHub repository to the current working directory
+",
+    "!git clone https://github.com/open-mmlab/mmdetection3d.git
+",
+    "
+",
+    "# Change the current working directory to the cloned MMDetection3D directory
+",
+    "%cd mmdetection3d
+",
+    "
+",
+    "# Install additional build dependencies required by MMDetection3D
+",
+    "!pip install -r requirements/build.txt
+",
+    "
+",
+    "# Install MMDetection3D in editable mode to allow direct modifications to the code
+",
+    "!pip install -e .
+",
+    "
+",
+    "# Generate KITTI dataset information files needed for training and testing
+",
+    "!python tools/create_data.py kitti \
+",
+    "    --root-path /content/drive/MyDrive/KITTI \
+",
+    "    --out-dir /content/drive/MyDrive/KITTI \
+",
+    "    --extra-tag kitti
+",
+    "
+",
+    "# Train the SECOND (Sparse Encoders for Object Detection) model on the KITTI dataset
+",
+    "!python tools/train.py configs/second/second_hv_secfpn_8xb6-80e_kitti-3d-car.py \
+",
+    "    --work-dir work_dirs/second/
+",
+    "
+",
+    "# Test the trained SECOND model using a specific checkpoint
+",
+    "!python tools/test.py configs/second/second_hv_secfpn_8xb6-80e_kitti-3d-car.py \
+",
+    "    work_dirs/second/epoch_40.pth --task lidar_det
+"
+   ]
+  }
+ ],
+ "metadata": {
+  "kernelspec": {
+   "display_name": "Python 3",
+   "language": "python",
+   "name": "python3"
+  },
+  "language_info": {
+   "codemirror_mode": {
+    "name": "ipython",
+    "version": 3
+   },
+   "file_extension": ".py",
+   "mimetype": "text/x-python",
+   "name": "python",
+   "nbconvert_exporter": "python",
+   "pygments_lexer": "ipython3",
+   "version": "3.8.10"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 4
+}
+```
+
+---
+
+## **4. Code Modifications**
 
 ### **Fixing `np.long` Issue**
 Replace `np.long` with `np.int64` in the following file:
@@ -114,40 +269,7 @@ Replace `np.long` with `np.int64` in the following file:
 
 ---
 
-## **4. Output Results**
-
-After running the test command, you will see results like the following:
-
-| Metric       | IoU Threshold       | Difficulty Level | BBox AP | BEV AP  | 3D AP   | AOS  |
-|--------------|---------------------|------------------|---------|---------|---------|------|
-| **AP11**     | **@0.70, 0.70, 0.70** | Easy             | 0.0250  | 0.0273  | 0.0000  | 0.02 |
-|              |                     | Moderate         | 0.0249  | 0.0273  | 0.0000  | 0.02 |
-|              |                     | Hard             | 0.0249  | 0.0273  | 0.0000  | 0.02 |
-| **AP11**     | **@0.70, 0.50, 0.50** | Easy             | 0.0250  | 0.0751  | 0.0751  | 0.02 |
-|              |                     | Moderate         | 0.0249  | 0.0996  | 0.0996  | 0.02 |
-|              |                     | Hard             | 0.0249  | 0.0996  | 0.0996  | 0.02 |
-
-Interpret these metrics to analyze the model's performance in 3D object detection.
-
----
-
-## **5. Notes and Troubleshooting**
-1. **Work Directory**:
-   Ensure `--work-dir` is specified correctly for saving checkpoints and logs.
-
-2. **Dataset Issues**:
-   - Verify that all required folders (`image_2`, `velodyne`, etc.) exist in the dataset directory.
-   - Ensure `.bin` files and `.txt` labels are formatted as per KITTI's structure.
-
-3. **Checkpoint Path**:
-   - Use the correct checkpoint path (e.g., `epoch_40.pth`) during testing.
-
-4. **Environment Conflicts**:
-   - If you face library version conflicts, use a clean environment or container (e.g., Docker).
-
----
-
-## **6. References**
+## **5. References**
 - [MMDetection3D Documentation](https://mmdetection3d.readthedocs.io/en/latest/)
 - [KITTI Dataset](http://www.cvlibs.net/datasets/kitti/)
 - [Google Colab Setup](https://colab.research.google.com/)
