@@ -7,12 +7,34 @@ This repository provides a complete workflow for setting up **MMDetection3D**, p
 
 ## **1. KITTI Dataset Folder Structure and Download**
 
-### **Dataset Download**
-1. Visit the official KITTI dataset website: [KITTI Dataset](http://www.cvlibs.net/datasets/kitti/).
-2. Download the following components:
-   - **3D Object Detection Data**: Contains `image_2/`, `label_2/`, `velodyne/`, and `calib/` folders.
-   - Optionally, download `planes/` for plane information.
-3. Extract the downloaded files into a directory, ensuring the following structure:
+### **Dataset Download in Colab**
+To download and prepare the KITTI dataset directly in the Colab environment, run the following commands in the shell:
+
+```bash
+# Install required tools
+apt-get install -y wget unzip
+
+# Create the dataset directory
+mkdir -p /content/drive/MyDrive/KITTI
+
+# Download KITTI dataset files
+# Left images for training
+wget -P /content/drive/MyDrive/KITTI/ http://www.cvlibs.net/download.php?file=data_object_image_2.zip
+# Velodyne point clouds
+wget -P /content/drive/MyDrive/KITTI/ http://www.cvlibs.net/download.php?file=data_object_velodyne.zip
+# Calibration files
+wget -P /content/drive/MyDrive/KITTI/ http://www.cvlibs.net/download.php?file=data_object_calib.zip
+# Labels for training
+wget -P /content/drive/MyDrive/KITTI/ http://www.cvlibs.net/download.php?file=data_object_label_2.zip
+
+# Extract the files
+unzip /content/drive/MyDrive/KITTI/data_object_image_2.zip -d /content/drive/MyDrive/KITTI
+unzip /content/drive/MyDrive/KITTI/data_object_velodyne.zip -d /content/drive/MyDrive/KITTI
+unzip /content/drive/MyDrive/KITTI/data_object_calib.zip -d /content/drive/MyDrive/KITTI
+unzip /content/drive/MyDrive/KITTI/data_object_label_2.zip -d /content/drive/MyDrive/KITTI
+```
+
+Ensure that the dataset follows this structure after extraction:
 
 ```plaintext
 KITTI/
@@ -27,7 +49,30 @@ KITTI/
 │   ├── velodyne/          # LiDAR point clouds
 │   ├── calib/             # Calibration files
 │   └── planes/            # Optional plane information (if available)
+└── ImageSets/
+    ├── train.txt          # List of training samples
+    ├── val.txt            # List of validation samples
+    ├── trainval.txt       # Combined list of training and validation samples
+    ├── test.txt           # List of testing samples
 ```
+
+### **Control the Sample Size with `ImageSets`**
+The `ImageSets` folder allows you to control the number of samples used for training, validation, and testing by editing the following files:
+- **`train.txt`**: Contains indices of samples used for training.
+- **`val.txt`**: Contains indices of samples used for validation.
+- **`test.txt`**: Contains indices of samples used for testing.
+- **`trainval.txt`**: A combined list of training and validation samples.
+
+To reduce the sample size, modify these files by including only the desired sample indices.
+
+Example:
+```plaintext
+000000
+000001
+000002
+```
+
+This will limit the dataset to three samples.
 
 ---
 
@@ -100,155 +145,35 @@ python tools/test.py configs/second/second_hv_secfpn_8xb6-80e_kitti-3d-car.py \
 
 ---
 
-## **3. Full Colab Notebook**
+## **3. Google Colab Workflow**
 
-Save the following code as `full-process-colab.ipynb` to automate the entire process in Google Colab:
+To streamline the entire process in Google Colab, follow this sequence of steps:
 
-```python
-{
- "cells": [
-  {
-   "cell_type": "code",
-   "execution_count": null,
-   "metadata": {},
-   "outputs": [],
-   "source": [
-    "# Import the Google Drive module from Google Colab to interact with Google Drive
-",
-    "from google.colab import drive
-",
-    "
-",
-    "# Mount your Google Drive to access files stored in it
-",
-    "drive.mount('/content/drive')
-",
-    "
-",
-    "# Import PyTorch to verify the installed version
-",
-    "import torch
-",
-    "
-",
-    "# Print the version of PyTorch installed in the Colab environment
-",
-    "print(f"PyTorch version: {torch.__version__}")
-",
-    "
-",
-    "# Uninstall existing versions of PyTorch, torchvision, and torchaudio to ensure a clean environment
-",
-    "!pip uninstall -y torch torchvision torchaudio
-",
-    "
-",
-    "# Install specific versions of PyTorch, torchvision, and torchaudio compatible with CUDA 11.8
-",
-    "!pip install torch==2.0.0+cu118 torchvision==0.15.1+cu118 torchaudio==2.0.1 --extra-index-url https://download.pytorch.org/whl/cu118
-",
-    "
-",
-    "# Install MMEngine, the engine that supports OpenMMLab frameworks like MMDetection3D
-",
-    "!pip install mmengine==0.9.1
-",
-    "
-",
-    "# Install MMCV (OpenMMLab's foundational library) with CUDA 11.8 and PyTorch 2.0.0 support
-",
-    "!pip install mmcv==2.0.0 -f https://download.openmmlab.com/mmcv/dist/cu118/torch2.0.0/index.html
-",
-    "
-",
-    "# Install MMDetection (2D object detection framework by OpenMMLab)
-",
-    "!pip install mmdet==3.0.0
-",
-    "
-",
-    "# Install MMDetection3D (3D object detection framework by OpenMMLab)
-",
-    "!pip install mmdet3d==1.1.0
-",
-    "
-",
-    "# Clone the MMDetection3D GitHub repository to the current working directory
-",
-    "!git clone https://github.com/open-mmlab/mmdetection3d.git
-",
-    "
-",
-    "# Change the current working directory to the cloned MMDetection3D directory
-",
-    "%cd mmdetection3d
-",
-    "
-",
-    "# Install additional build dependencies required by MMDetection3D
-",
-    "!pip install -r requirements/build.txt
-",
-    "
-",
-    "# Install MMDetection3D in editable mode to allow direct modifications to the code
-",
-    "!pip install -e .
-",
-    "
-",
-    "# Generate KITTI dataset information files needed for training and testing
-",
-    "!python tools/create_data.py kitti \
-",
-    "    --root-path /content/drive/MyDrive/KITTI \
-",
-    "    --out-dir /content/drive/MyDrive/KITTI \
-",
-    "    --extra-tag kitti
-",
-    "
-",
-    "# Train the SECOND (Sparse Encoders for Object Detection) model on the KITTI dataset
-",
-    "!python tools/train.py configs/second/second_hv_secfpn_8xb6-80e_kitti-3d-car.py \
-",
-    "    --work-dir work_dirs/second/
-",
-    "
-",
-    "# Test the trained SECOND model using a specific checkpoint
-",
-    "!python tools/test.py configs/second/second_hv_secfpn_8xb6-80e_kitti-3d-car.py \
-",
-    "    work_dirs/second/epoch_40.pth --task lidar_det
-"
-   ]
-  }
- ],
- "metadata": {
-  "kernelspec": {
-   "display_name": "Python 3",
-   "language": "python",
-   "name": "python3"
-  },
-  "language_info": {
-   "codemirror_mode": {
-    "name": "ipython",
-    "version": 3
-   },
-   "file_extension": ".py",
-   "mimetype": "text/x-python",
-   "name": "python",
-   "nbconvert_exporter": "python",
-   "pygments_lexer": "ipython3",
-   "version": "3.8.10"
-  }
- },
- "nbformat": 4,
- "nbformat_minor": 4
-}
-```
+1. **Mount Google Drive**:
+   ```python
+   from google.colab import drive
+   drive.mount('/content/drive')
+   ```
+
+2. **Setup Environment**:
+   Install required libraries as detailed in the **Environment Setup** section above.
+
+3. **Download KITTI Dataset**:
+   Use the commands provided in the **Dataset Download in Colab** section to download and extract the dataset.
+
+4. **Prepare KITTI Dataset**:
+   ```bash
+   python tools/create_data.py kitti \
+       --root-path /content/drive/MyDrive/KITTI \
+       --out-dir /content/drive/MyDrive/KITTI_CONVERTED \
+       --extra-tag kitti
+   ```
+
+5. **Train and Test Models**:
+   Use the commands in **Training** and **Testing** sections.
+
+6. **Check Results**:
+   Review the evaluation metrics for model performance, including AP metrics for BBox, BEV, and 3D.
 
 ---
 
