@@ -5,6 +5,16 @@ _base_ = [
 ]
 point_cloud_range = [0, -40, -3, 70.4, 40, 1]
 model = dict(
+    voxel_encoder=dict(
+        type='AdaptiveVFE',
+        base_vfe_cfg=dict(type='HardSimpleVFE', num_features=4),
+        embed_dims=256,
+        num_heads=8,
+        num_layers=3,
+        pos_encoding_cfg=dict(type='ConvBNPositionalEncoding', input_channel=3, num_pos_feats=256),
+        attention_threshold=0.5,
+        voxel_size=[0.05, 0.05, 0.1],  # Pass voxel size for coordinate conversion
+        point_cloud_range=point_cloud_range),  # Pass point cloud range
     bbox_head=dict(
         type='Anchor3DHead',
         num_classes=1,
