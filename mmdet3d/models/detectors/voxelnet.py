@@ -48,7 +48,7 @@ class VoxelNet(SingleStage3DDetector):
     #     return x
 # In file: /home/cse/mmdetection_project/mmdetection3d/mmdet3d/models/detectors/voxelnet.py
 
-    def extract_feat(self, batch_inputs_dict: dict) -> torch.Tensor:
+    def extract_feat(self, batch_inputs_dict: dict) -> Tensor:
         """Extract features from points.
     
         Args:
