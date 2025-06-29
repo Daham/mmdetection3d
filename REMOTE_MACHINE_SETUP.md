@@ -106,10 +106,10 @@ mkdir -p data/kitti
 cd data/kitti
 
 # Download raw training components
-wget https://s3.eu-central-1.amazonaws.com/avg-kitti/data_object_image_2.zip
-wget https://s3.eu-central-1.amazonaws.com/avg-kitti/data_object_velodyne.zip
-wget https://s3.eu-central-1.amazonaws.com/avg-kitti/data_object_calib.zip
-wget https://s3.eu-central-1.amazonaws.com/avg-kitti/data_object_label_2.zip
+wget -P . https://s3.eu-central-1.amazonaws.com/avg-kitti/data_object_image_2.zip
+wget -P . https://s3.eu-central-1.amazonaws.com/avg-kitti/data_object_velodyne.zip
+wget -P . https://s3.eu-central-1.amazonaws.com/avg-kitti/data_object_calib.zip
+wget -P . https://s3.eu-central-1.amazonaws.com/avg-kitti/data_object_label_2.zip
 ```
 
 ---
@@ -202,7 +202,7 @@ mmdetection3d/configs/_base_/datasets/kitti-3d-car.py
 Update the `data_root` variable to your dataset path:
 
 ```python
-data_root = '/home/cse/mmdetection_project/dataset/KITTI/'
+data_root = '/home/{username}/mmdetection_project/data/kitti/'
 ```
 
 ---
