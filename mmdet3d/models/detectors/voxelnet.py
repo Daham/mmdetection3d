@@ -48,34 +48,37 @@ class VoxelNet(SingleStage3DDetector):
     #     return x
 # In file: /home/cse/mmdetection_project/mmdetection3d/mmdet3d/models/detectors/voxelnet.py
 
+# In file: /home/cse/mmdetection_project/mmdetection3d/mmdet3d/models/detectors/voxelnet.py
+
+
     def extract_feat(self, batch_inputs_dict: dict) -> Tensor:
         """Extract features from points.
     
         Args:
             batch_inputs_dict (dict): The a batch of inputs dict, which usually
-                contains the voxel information.
+                contains the voxel information and data samples.
     
         Returns:
             torch.Tensor: The B x C x H x W features after middle encoder.
         """
         voxel_dict = batch_inputs_dict['voxels']
         
-        # --- START OF CHANGES ---
-    
-        # Your custom VFE has the signature: forward(self, features, num_points, coors)
-        # The original call was missing the 'coors' argument. Add it here.
-        # It now returns a tuple, so we must unpack it.
+        # Your custom VFE returns a tuple of (features, coors)
+        # We unpack it here.
         voxel_features, updated_coors = self.voxel_encoder(
             voxel_dict['voxels'], voxel_dict['num_points'], voxel_dict['coors'])
     
-        batch_size = batch_inputs_dict['batch_input_metas'][0]['batch_size']
+        # --- START OF CHANGE ---
         
-        # Now, pass the UNPACKED voxel_features and the UPDATED updated_coors
-        # to the middle encoder. Do NOT use the old voxel_dict['coors'].
+        # Get the batch size from the length of the data_samples list.
+        # This is the robust, modern way to do it in mmengine.
+        batch_size = len(batch_inputs_dict['data_samples'])
+    
+        # --- END OF CHANGE ---
+        
+        # Pass the unpacked features and UPDATED coordinates to the middle encoder.
         x = self.middle_encoder(voxel_features, updated_coors, batch_size)
         
-        # --- END OF CHANGES ---
-    
         x = self.backbone(x)
         if self.with_neck:
             x = self.neck(x)
