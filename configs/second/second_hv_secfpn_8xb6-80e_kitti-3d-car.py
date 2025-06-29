@@ -28,6 +28,7 @@ model = dict(
     # model training and testing settings
     train_cfg=dict(
         _delete_=True,
+        max_epochs=5,
         assigner=dict(
             type='Max3DIoUAssigner',
             iou_calculator=dict(type='BboxOverlapsNearest3D'),
