@@ -7,6 +7,8 @@ from mmdet3d.registry import MODELS
 from mmdet3d.utils import ConfigType, OptConfigType, OptMultiConfig
 from .single_stage import SingleStage3DDetector
 
+from typing import List
+
 
 @MODELS.register_module()
 class VoxelNet(SingleStage3DDetector):
