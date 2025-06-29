@@ -57,7 +57,7 @@ class VoxelNet(SingleStage3DDetector):
 
 
     def extract_feat(self, batch_inputs_dict: dict,
-                     batch_data_samples: List['Det3DDataSample']) -> torch.Tensor:
+                     batch_data_samples: List['Det3DDataSample']) -> Tensor:
         """Extract features from points.
     
         Args:
