@@ -33,15 +33,49 @@ class VoxelNet(SingleStage3DDetector):
         self.voxel_encoder = MODELS.build(voxel_encoder)
         self.middle_encoder = MODELS.build(middle_encoder)
 
-    def extract_feat(self, batch_inputs_dict: dict) -> Tuple[Tensor]:
-        """Extract features from points."""
+    # def extract_feat(self, batch_inputs_dict: dict) -> Tuple[Tensor]:
+    #     """Extract features from points."""
+    #     voxel_dict = batch_inputs_dict['voxels']
+    #     voxel_features = self.voxel_encoder(voxel_dict['voxels'],
+    #                                         voxel_dict['num_points'],
+    #                                         voxel_dict['coors'])
+    #     batch_size = voxel_dict['coors'][-1, 0].item() + 1
+    #     x = self.middle_encoder(voxel_features, voxel_dict['coors'],
+    #                             batch_size)
+    #     x = self.backbone(x)
+    #     if self.with_neck:
+    #         x = self.neck(x)
+    #     return x
+# In file: /home/cse/mmdetection_project/mmdetection3d/mmdet3d/models/detectors/voxelnet.py
+
+    def extract_feat(self, batch_inputs_dict: dict) -> torch.Tensor:
+        """Extract features from points.
+    
+        Args:
+            batch_inputs_dict (dict): The a batch of inputs dict, which usually
+                contains the voxel information.
+    
+        Returns:
+            torch.Tensor: The B x C x H x W features after middle encoder.
+        """
         voxel_dict = batch_inputs_dict['voxels']
-        voxel_features = self.voxel_encoder(voxel_dict['voxels'],
-                                            voxel_dict['num_points'],
-                                            voxel_dict['coors'])
-        batch_size = voxel_dict['coors'][-1, 0].item() + 1
-        x = self.middle_encoder(voxel_features, voxel_dict['coors'],
-                                batch_size)
+        
+        # --- START OF CHANGES ---
+    
+        # Your custom VFE has the signature: forward(self, features, num_points, coors)
+        # The original call was missing the 'coors' argument. Add it here.
+        # It now returns a tuple, so we must unpack it.
+        voxel_features, updated_coors = self.voxel_encoder(
+            voxel_dict['voxels'], voxel_dict['num_points'], voxel_dict['coors'])
+    
+        batch_size = batch_inputs_dict['batch_input_metas'][0]['batch_size']
+        
+        # Now, pass the UNPACKED voxel_features and the UPDATED updated_coors
+        # to the middle encoder. Do NOT use the old voxel_dict['coors'].
+        x = self.middle_encoder(voxel_features, updated_coors, batch_size)
+        
+        # --- END OF CHANGES ---
+    
         x = self.backbone(x)
         if self.with_neck:
             x = self.neck(x)
