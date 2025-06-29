@@ -38,6 +38,7 @@ REMOTE_SSH_USER="$(whoami)"
 
 sudo apt update
 sudo apt install -y software-properties-common python${PYTHON_VERSION} python${PYTHON_VERSION}-venv python${PYTHON_VERSION}-dev
+sudo apt install -y software-properties-common python3.8 python3.8-venv python3.8-dev
 sudo apt install -y nvidia-cuda-toolkit  # Required for building MMCV CUDA ops
 
 mkdir -p "$PROJECT_DIR"
