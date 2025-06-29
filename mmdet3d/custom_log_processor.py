@@ -5,6 +5,8 @@ class CustomLogProcessor(LogProcessor):
         log_str = super().get_log_after_iter(runner, batch_idx, mode)
         # Add or format fields as needed
         log_vars = runner.message_hub.get_info('log_vars')
+        # Print log_vars for debugging
+        print(f"[CustomLogProcessor] log_vars: {log_vars}")
         # Compose your custom log string
         log_items = [
             f"Epoch [{runner.epoch + 1}][{batch_idx + 1}/{len(runner.train_dataloader)}]",
