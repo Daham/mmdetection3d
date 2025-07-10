@@ -7,7 +7,7 @@ model = dict(
         voxel=True,
         voxel_layer=dict(
             max_num_points=5,
-            point_cloud_range=[0, -25, -1.5, 40, 25, 1.5], 
+            point_cloud_range=[0, -40.0, -3.0, 70.4, 40.0, 1.0], 
             voxel_size=voxel_size,
             max_voxels=(16000, 40000))),
     voxel_encoder=dict(type='HardSimpleVFE'),
@@ -15,7 +15,7 @@ model = dict(
         type='SparseEncoder',
         in_channels=4,
         # sparse_shape=[41, 1600, 1408],
-        sparse_shape = [10, 100, 80],
+        sparse_shape=[8, 160, 141],
         order=('conv', 'norm', 'act')),
     backbone=dict(
         type='SECOND',
