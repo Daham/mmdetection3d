@@ -8,15 +8,14 @@ model = dict(
         voxel=True,
         voxel_layer=dict(
             max_num_points=5,
-            point_cloud_range=[0, -40.0, -3.0, 70.4, 40.0, 1.0], 
+            point_cloud_range=[0, -40.0, -3.0, 70.4, 40.0, 1.0], # Standard KITTI range
             voxel_size=voxel_size,
             max_voxels=(16000, 40000))),
     voxel_encoder=dict(type='HardSimpleVFE'),
     middle_encoder=dict(
         type='SparseEncoder',
         in_channels=4,
-        # sparse_shape=[41, 1600, 1408],
-        sparse_shape=[16, 282, 320],
+        sparse_shape=[16, 320, 282],
         order=('conv', 'norm', 'act')),
     backbone=dict(
         type='SECOND',
