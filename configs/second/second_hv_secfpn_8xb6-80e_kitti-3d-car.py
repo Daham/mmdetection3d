@@ -39,3 +39,7 @@ model = dict(
         allowed_border=0,
         pos_weight=-1,
         debug=False))
+
+optim_wrapper = dict(
+    optimizer=dict(type='AdamW', lr=0.0002, weight_decay=0.01)
+)

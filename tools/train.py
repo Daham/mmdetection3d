@@ -137,6 +137,9 @@ def main():
         # if 'runner_type' is set in the cfg
         runner = RUNNERS.build(cfg)
 
+    # Print number of training samples
+    print('Number of training samples:', len(runner.train_dataloader.dataset))
+
     # start training
     runner.train()
 
