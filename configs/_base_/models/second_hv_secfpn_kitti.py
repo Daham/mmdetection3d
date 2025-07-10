@@ -14,7 +14,8 @@ model = dict(
     middle_encoder=dict(
         type='SparseEncoder',
         in_channels=4,
-        sparse_shape=[41, 1600, 1408],
+        # sparse_shape=[41, 1600, 1408],
+        sparse_shape = [10, 100, 80],
         order=('conv', 'norm', 'act')),
     backbone=dict(
         type='SECOND',
@@ -35,10 +36,15 @@ model = dict(
         use_direction_classifier=True,
         anchor_generator=dict(
             type='Anchor3DRangeGenerator',
+            # ranges=[
+            #     [0, -40.0, -0.6, 70.4, 40.0, -0.6],
+            #     [0, -40.0, -0.6, 70.4, 40.0, -0.6],
+            #     [0, -40.0, -1.78, 70.4, 40.0, -1.78],
+            # ],
             ranges=[
-                [0, -40.0, -0.6, 70.4, 40.0, -0.6],
-                [0, -40.0, -0.6, 70.4, 40.0, -0.6],
-                [0, -40.0, -1.78, 70.4, 40.0, -1.78],
+                [0, -40.0, -0.6, 70.4, 40.0, -0.1],   # pedestrian
+                [0, -40.0, -0.6, 70.4, 40.0, -0.1],   # cyclist
+                [0, -40.0, -3.0, 70.4, 40.0, 1.0],    # car
             ],
             sizes=[[0.8, 0.6, 1.73], [1.76, 0.6, 1.73], [3.9, 1.6, 1.56]],
             rotations=[0, 1.57],
