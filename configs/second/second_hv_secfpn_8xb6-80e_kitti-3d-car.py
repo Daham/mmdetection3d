@@ -22,7 +22,11 @@ model = dict(
             _delete_=True,
             type='Anchor3DRangeGenerator',
             # ranges=[[0, -40.0, -1.78, 70.4, 40.0, -1.78]],
-        
+            ranges=[
+                [0, -40.0, -0.6, 70.4, 40.0, -0.1],   # pedestrian
+                [0, -40.0, -0.6, 70.4, 40.0, -0.1],   # cyclist
+                [0, -40.0, -3.0, 70.4, 40.0, 1.0],    # car
+            ],
             sizes=[[3.9, 1.6, 1.56]],
             rotations=[0, 1.57],
             reshape_out=True)),
