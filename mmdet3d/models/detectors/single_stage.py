@@ -141,7 +141,7 @@ class SingleStage3DDetector(Base3DDetector):
         return results
 
     def extract_feat(
-        self, batch_inputs_dict: Dict[str, Tensor]
+        self, batch_inputs_dict: Dict[str, Tensor],batch_data_samples=None
     ) -> Union[Tuple[torch.Tensor], Dict[str, Tensor]]:
         """Directly extract features from the backbone+neck.
 

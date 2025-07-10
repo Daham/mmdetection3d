@@ -85,7 +85,7 @@ class VoxelNet(SingleStage3DDetector):
     #         x = self.neck(x)
     #     return x
 
-    def extract_feat(self, batch_inputs_dict: dict) -> Tensor:
+    def extract_feat(self, batch_inputs_dict: dict, batch_data_samples=None) -> Tensor:
         """Extract features from points.
     
         This method supports both standard HardVFE (which returns only voxel_features)
