@@ -71,7 +71,10 @@ class SingleStage3DDetector(Base3DDetector):
         Returns:
             dict: A dictionary of loss components.
         """
-        x = self.extract_feat(batch_inputs_dict, batch_data_samples)
+        if batch_data_samples is not None:
+            x = self.extract_feat(batch_inputs_dict, batch_data_samples)
+        else:
+            x = self.extract_feat(batch_inputs_dict)
         losses = self.bbox_head.loss(x, batch_data_samples, **kwargs)
         return losses
 
@@ -106,7 +109,10 @@ class SingleStage3DDetector(Base3DDetector):
                 - bboxes_3d (Tensor): Contains a tensor with shape
                     (num_instances, C) where C >=7.
         """
-        x = self.extract_feat(batch_inputs_dict, batch_data_samples)
+        if batch_data_samples is not None:
+            x = self.extract_feat(batch_inputs_dict, batch_data_samples)
+        else:
+            x = self.extract_feat(batch_inputs_dict)
         results_list = self.bbox_head.predict(x, batch_data_samples, **kwargs)
         predictions = self.add_pred_to_datasample(batch_data_samples,
                                                   results_list)
