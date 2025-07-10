@@ -137,27 +137,68 @@ class SingleStage3DDetector(Base3DDetector):
         results = self.bbox_head.forward(x)
         return results
 
-    def extract_feat(
-        self, batch_inputs_dict: Dict[str, Tensor]
-    ) -> Union[Tuple[torch.Tensor], Dict[str, Tensor]]:
-        """Directly extract features from the backbone+neck.
+    # def extract_feat(
+    #     self, batch_inputs_dict: Dict[str, Tensor]
+    # ) -> Union[Tuple[torch.Tensor], Dict[str, Tensor]]:
+    #     """Directly extract features from the backbone+neck.
 
-        Args:
-            batch_inputs_dict (dict): The model input dict which include
-                'points', 'img' keys.
+    #     Args:
+    #         batch_inputs_dict (dict): The model input dict which include
+    #             'points', 'img' keys.
 
-                    - points (list[torch.Tensor]): Point cloud of each sample.
-                    - imgs (torch.Tensor, optional): Image of each sample.
+    #                 - points (list[torch.Tensor]): Point cloud of each sample.
+    #                 - imgs (torch.Tensor, optional): Image of each sample.
 
-        Returns:
-            tuple[Tensor] | dict:  For outside 3D object detection, we
-                typically obtain a tuple of features from the backbone + neck,
-                and for inside 3D object detection, usually a dict containing
-                features will be obtained.
+    #     Returns:
+    #         tuple[Tensor] | dict:  For outside 3D object detection, we
+    #             typically obtain a tuple of features from the backbone + neck,
+    #             and for inside 3D object detection, usually a dict containing
+    #             features will be obtained.
+    #     """
+    #     points = batch_inputs_dict['points']
+    #     stack_points = torch.stack(points)
+    #     x = self.backbone(stack_points)
+    #     if self.with_neck:
+    #         x = self.neck(x)
+    #     return x
+
+    def extract_feat(self, batch_inputs_dict: dict, batch_data_samples=None):
+        """Extract features from points.
+    
+        This method supports both standard HardVFE (which returns only voxel_features)
+        and custom encoders like AdaptiveVFE (which may return a tuple of outputs).
+        The code checks the output type to handle both cases.
         """
-        points = batch_inputs_dict['points']
-        stack_points = torch.stack(points)
-        x = self.backbone(stack_points)
+        voxel_dict = batch_inputs_dict['voxels']
+    
+        # Call the voxel encoder with the required arguments.
+        # Some encoders (e.g., HardVFE) return only voxel_features,
+        # while others (e.g., AdaptiveVFE) return a tuple (voxel_features, updated_coors, ...).
+        voxel_encoder_out = self.voxel_encoder(
+            voxel_dict['voxels'], voxel_dict['num_points'], voxel_dict['coors']
+        )
+    
+        # --- Differentiating between HardVFE and AdaptiveVFE ---
+        # If the output is a tuple (as in AdaptiveVFE), unpack the first two values.
+        # If the output is a single tensor (as in HardVFE), use the original coordinates.
+        if isinstance(voxel_encoder_out, tuple):
+            # AdaptiveVFE: returns (voxel_features, updated_coors, ...)
+            voxel_features, updated_coors = voxel_encoder_out[:2]
+        else:
+            # HardVFE: returns only voxel_features
+            voxel_features = voxel_encoder_out
+            updated_coors = voxel_dict['coors']
+        # -------------------------------------------------------
+    
+        # Get batch size from batch_input_metas if available, otherwise infer from coordinates.
+        if 'batch_input_metas' in batch_inputs_dict:
+            batch_size = batch_inputs_dict['batch_input_metas'][0]['batch_size']
+        else:
+            batch_size = voxel_dict['coors'][-1, 0].item() + 1
+    
+        # Pass features and coordinates to the middle encoder.
+        x = self.middle_encoder(voxel_features, updated_coors, batch_size)
+        x = self.backbone(x)
         if self.with_neck:
             x = self.neck(x)
         return x
