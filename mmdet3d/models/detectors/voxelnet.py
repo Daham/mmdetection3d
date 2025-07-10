@@ -56,30 +56,71 @@ class VoxelNet(SingleStage3DDetector):
     # In file: /home/cse/mmdetection_project/mmdetection3d/mmdet3d/models/detectors/voxelnet.py
 
 
-    def extract_feat(self, batch_inputs_dict: dict,
-                     batch_data_samples: List['Det3DDataSample']) -> Tensor:
+    # def extract_feat(self, batch_inputs_dict: dict,
+    #                  batch_data_samples: List['Det3DDataSample']) -> Tensor:
+    #     """Extract features from points.
+    
+    #     Args:
+    #         batch_inputs_dict (dict): The batch of inputs, containing voxel info.
+    #         batch_data_samples (List[Det3DDataSample]): The batch of data samples,
+    #             containing metadata.
+    
+    #     Returns:
+    #         torch.Tensor: The B x C x H x W features after middle encoder.
+    #     """
+    #     voxel_dict = batch_inputs_dict['voxels']
+    
+    #     voxel_features, updated_coors = self.voxel_encoder(
+    #         voxel_dict['voxels'], voxel_dict['num_points'], voxel_dict['coors'])
+    
+    #     # --- THIS IS THE FINAL FIX ---
+    #     # The batch size is the length of the batch_data_samples list,
+    #     # which is now correctly passed into this function.
+    #     batch_size = len(batch_data_samples)
+    
+    #     x = self.middle_encoder(voxel_features, updated_coors, batch_size)
+    
+    #     x = self.backbone(x)
+    #     if self.with_neck:
+    #         x = self.neck(x)
+    #     return x
+
+    def extract_feat(self, batch_inputs_dict: dict) -> torch.Tensor:
         """Extract features from points.
     
-        Args:
-            batch_inputs_dict (dict): The batch of inputs, containing voxel info.
-            batch_data_samples (List[Det3DDataSample]): The batch of data samples,
-                containing metadata.
-    
-        Returns:
-            torch.Tensor: The B x C x H x W features after middle encoder.
+        This method supports both standard HardVFE (which returns only voxel_features)
+        and custom encoders like AdaptiveVFE (which may return a tuple of outputs).
+        The code checks the output type to handle both cases.
         """
         voxel_dict = batch_inputs_dict['voxels']
     
-        voxel_features, updated_coors = self.voxel_encoder(
-            voxel_dict['voxels'], voxel_dict['num_points'], voxel_dict['coors'])
+        # Call the voxel encoder with the required arguments.
+        # Some encoders (e.g., HardVFE) return only voxel_features,
+        # while others (e.g., AdaptiveVFE) return a tuple (voxel_features, updated_coors, ...).
+        voxel_encoder_out = self.voxel_encoder(
+            voxel_dict['voxels'], voxel_dict['num_points'], voxel_dict['coors']
+        )
     
-        # --- THIS IS THE FINAL FIX ---
-        # The batch size is the length of the batch_data_samples list,
-        # which is now correctly passed into this function.
-        batch_size = len(batch_data_samples)
+        # --- Differentiating between HardVFE and AdaptiveVFE ---
+        # If the output is a tuple (as in AdaptiveVFE), unpack the first two values.
+        # If the output is a single tensor (as in HardVFE), use the original coordinates.
+        if isinstance(voxel_encoder_out, tuple):
+            # AdaptiveVFE: returns (voxel_features, updated_coors, ...)
+            voxel_features, updated_coors = voxel_encoder_out[:2]
+        else:
+            # HardVFE: returns only voxel_features
+            voxel_features = voxel_encoder_out
+            updated_coors = voxel_dict['coors']
+        # -------------------------------------------------------
     
+        # Get batch size from batch_input_metas if available, otherwise infer from coordinates.
+        if 'batch_input_metas' in batch_inputs_dict:
+            batch_size = batch_inputs_dict['batch_input_metas'][0]['batch_size']
+        else:
+            batch_size = voxel_dict['coors'][-1, 0].item() + 1
+    
+        # Pass features and coordinates to the middle encoder.
         x = self.middle_encoder(voxel_features, updated_coors, batch_size)
-    
         x = self.backbone(x)
         if self.with_neck:
             x = self.neck(x)
