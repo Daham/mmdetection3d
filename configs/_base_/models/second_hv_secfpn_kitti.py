@@ -1,4 +1,5 @@
-voxel_size=[0.5, 0.5, 0.5],
+# voxel_size=[0.5, 0.5, 0.5],
+voxel_size = [0.25, 0.25, 0.25]
 
 model = dict(
     type='VoxelNet',
