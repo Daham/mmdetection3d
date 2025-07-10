@@ -71,10 +71,7 @@ class SingleStage3DDetector(Base3DDetector):
         Returns:
             dict: A dictionary of loss components.
         """
-        if batch_data_samples is not None:
-            x = self.extract_feat(batch_inputs_dict, batch_data_samples)
-        else:
-            x = self.extract_feat(batch_inputs_dict)
+        x = self.extract_feat(batch_inputs_dict, batch_data_samples)
         losses = self.bbox_head.loss(x, batch_data_samples, **kwargs)
         return losses
 
