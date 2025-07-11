@@ -96,3 +96,11 @@ pip install mmcv==2.1.0 -f https://download.openmmlab.com/mmcv/dist/cu121/torch2
 ```bash
 python3 -c "import mmcv, torch, sys; print(f'Python: {sys.version.split()[0]}'); print(f'MMCV: {mmcv.__version__}'); print(f'CUDA Available: {torch.cuda.is_available()}'); print(f'GPU: {torch.cuda.get_device_name(0)}' if torch.cuda.is_available() else 'No CUDA'); import mmcv.ops; from mmcv.ops import RoIAlign; print('MMCV ops OK')"
 ```
+
+```bash
+git clone https://github.com/Daham/mmdetection3d.git
+git checkout develop
+
+pip install mmdet opencv-python matplotlib tqdm mmengine
+```
+
