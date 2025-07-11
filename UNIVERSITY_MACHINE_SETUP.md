@@ -76,7 +76,8 @@ source mmdet_env/bin/activate
 
 ```bash
 # Optional: Enable CUDA kernel debugging
-export CUDA_LAUNCH_BLOCKING=1
+echo 'export CUDA_LAUNCH_BLOCKING=1' >> ~/.bashrc
+source ~/.bashrc
 
 # Upgrade pip and setuptools
 pip install --upgrade pip setuptools wheel build
