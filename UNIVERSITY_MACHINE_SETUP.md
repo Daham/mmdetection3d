@@ -102,5 +102,11 @@ git clone https://github.com/Daham/mmdetection3d.git
 git checkout develop
 
 pip install mmdet opencv-python matplotlib tqdm mmengine
+
+# Install additional dependencies
+pip install -r requirements/build.txt
+
+# Install MMDetection3D in editable mode
+pip install -e .
 ```
 
