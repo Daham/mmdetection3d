@@ -13,7 +13,7 @@ from mmengine.evaluator import wrap_evaluator
 # --------- User settings ---------
 # Path to your config and checkpoint
 CONFIG_PATH = 'configs/second/second_hv_secfpn_8xb6-80e_kitti-3d-car-SECOND.py'
-CHECKPOINT_PATH = 'work_dirs/second_hv_secfpn_8xb6-80e_kitti-3d-car/latest.pth'
+CHECKPOINT_PATH = 'work_dirs/second_hv_secfpn_8xb6-80e_kitti-3d-car/epoch_20.pth'
 # Number of samples to use for speed test
 WARMUP_ITERS = 20
 TEST_ITERS = 200
