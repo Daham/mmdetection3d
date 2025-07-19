@@ -272,6 +272,7 @@
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from mmdet3d.registry import MODELS
 
 @MODELS.register_module()
@@ -280,12 +281,11 @@ class AdaptiveVFE(nn.Module):
     Adaptive Voxel Feature Encoder with:
         1) Base VFE to extract initial voxel features
         2) Early percentile-based pruning to select top-scoring voxels
-        3) Merging dropped voxels into nearest kept voxel (adaptive fusion)
+        3) Memory-efficient merging of dropped voxels via block-wise similarity
         4) Linear projection to higher-dimensional embeddings
-        5) Positional encoding via MLP on real-world voxel centers
+        5) Positional encoding via MLP on voxel centers
         6) Local self-attention using TransformerEncoder
         7) Back-projection to original feature channels for compatibility
-    Simple print logging for insights.
     """
     def __init__(
         self,
@@ -294,6 +294,7 @@ class AdaptiveVFE(nn.Module):
         num_heads=4,
         num_layers=1,
         keep_ratio=0.2,
+        merge_block_size=1024,
         voxel_size=(0.05, 0.05, 0.1),
         point_cloud_range=(0.0, -40.0, -3.0)
     ):
@@ -302,15 +303,15 @@ class AdaptiveVFE(nn.Module):
         self.base_vfe = MODELS.build(base_vfe_cfg)
         self.in_ch = getattr(self.base_vfe, 'out_channels', base_vfe_cfg.get('num_features'))
 
-        # 2) Projection to embedding dimension
+        # 2) Project to embedding dimension
         self.proj = nn.Linear(self.in_ch, embed_dims)
-        # 3) Positional encoding MLP
+        # 5) Positional encoding MLP
         self.pos_mlp = nn.Sequential(
             nn.Linear(3, embed_dims),
             nn.ReLU(inplace=True),
-            nn.Linear(embed_dims, embed_dims),
+            nn.Linear(embed_dims, embed_dims)
         )
-        # 4) Transformer for self-attention
+        # 6) Transformer for self-attention
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=embed_dims,
             nhead=num_heads,
@@ -318,10 +319,13 @@ class AdaptiveVFE(nn.Module):
             batch_first=True
         )
         self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
-        # 5) Back-projection to original channels
+        # 7) Back-projection to original channels
         self.back_proj = nn.Linear(embed_dims, self.in_ch)
-        # Pruning ratio
+
+        # Pruning and merging parameters
         self.keep_ratio = keep_ratio
+        self.merge_block_size = merge_block_size
+
         # Buffers for coordinate conversion
         self.register_buffer('voxel_size', torch.tensor(voxel_size).float())
         self.register_buffer('pc_range', torch.tensor(point_cloud_range).float())
@@ -329,55 +333,61 @@ class AdaptiveVFE(nn.Module):
     def forward(self, features, num_points, coors):
         """
         Args:
-            features (Tensor[N, M, C_in]): raw per-point features
+            features (Tensor[N, M, C_in]): per-point inputs
             num_points (Tensor[N]): valid points per voxel
             coors (Tensor[N, 4]): voxel coords (batch, z, y, x)
         Returns:
             out_feats (Tensor[K, C_in]), pruned_coors (Tensor[K, 4])
         """
-        # 1) Extract base features
+        # 1) Base VFE
         base_feats = self.base_vfe(features, num_points, coors)  # [N, C_in]
 
-        # 2) Early pruning: keep top scores
-        scores = base_feats.norm(p=2, dim=1)
+        # 2) Early pruning: keep only top-scoring voxels
+        scores = base_feats.norm(p=2, dim=1)  # [N]
         N = scores.size(0)
         K = max(int(N * self.keep_ratio), 1)
-        # indices to keep and drop
-        topk_vals, keep_idx = torch.topk(scores, K, sorted=False)
-        drop_idx = torch.arange(N, device=scores.device)
-        drop_idx = drop_idx[~torch.isin(drop_idx, keep_idx)]
-        kept_feats = base_feats[keep_idx]       # [K, C_in]
-        kept_coors = coors[keep_idx]            # [K, 4]
-        dropped_feats = base_feats[drop_idx]    # [N-K, C_in]
+        _, keep_idx = torch.topk(scores, K, sorted=False)
+        kept_feats = base_feats[keep_idx]      # [K, C_in]
+        kept_coors = coors[keep_idx]           # [K, 4]
+        # Determine dropped indices
+        all_idx = torch.arange(N, device=scores.device)
+        drop_idx = all_idx[~torch.isin(all_idx, keep_idx)]
+        dropped_feats = base_feats[drop_idx]   # [N-K, C_in]
 
-        print(f"[AdaptiveVFE] early prune: {N} -> {K} voxels, merging {len(drop_idx)}")
+        print(f"[AdaptiveVFE] early prune: {N} -> {K} voxels, merging {dropped_feats.size(0)}")
 
-        # 3) Merge dropped into nearest kept by cosine similarity
-        # normalize for cosine sim
-        kept_norm = nn.functional.normalize(kept_feats, dim=1)
-        dropped_norm = nn.functional.normalize(dropped_feats, dim=1)
-        # cosine similarities [N-K, K]
-        sims = torch.matmul(dropped_norm, kept_norm.t())
-        # find best match for each dropped voxel
-        best_idx = sims.argmax(dim=1)
-        # accumulate dropped into kept
-        for di, ki in enumerate(best_idx):
-            kept_feats[ki] = (kept_feats[ki] + dropped_feats[di]) * 0.5
+        # 3) Block-wise merging for memory efficiency
+        if dropped_feats.numel() > 0:
+            # normalized kept features for cosine similarity
+            kept_norm = F.normalize(kept_feats, dim=1)  # [K, C_in]
+            B = self.merge_block_size
+            for start in range(0, dropped_feats.size(0), B):
+                end = min(start + B, dropped_feats.size(0))
+                block = dropped_feats[start:end]           # [b, C_in]
+                block_norm = F.normalize(block, dim=1)     # [b, C_in]
+                # similarity [b, K]
+                sims = torch.matmul(block_norm, kept_norm.t())
+                best = sims.argmax(dim=1)                  # [b]
+                # merge by averaging
+                for i, ki in enumerate(best):
+                    kept_feats[ki] = (kept_feats[ki] + block[i]) * 0.5
 
-        # 4) Projection to embed dims
-        proj = self.proj(kept_feats)            # [K, D]
+        # 4) Project to embedding dimension
+        proj_feats = self.proj(kept_feats)          # [K, D]
+
         # 5) Positional encoding
         centers = (
             kept_coors[:, 1:].float() * self.voxel_size
             + self.pc_range.unsqueeze(0)
             + self.voxel_size.unsqueeze(0) * 0.5
-        )  # [K,3]
-        pos = self.pos_mlp(centers)             # [K, D]
-        fused = proj + pos                      # [K, D]
+        )  # [K, 3]
+        pos_feats = self.pos_mlp(centers)           # [K, D]
+        fused = proj_feats + pos_feats              # [K, D]
 
         # 6) Local self-attention
-        attn = self.transformer(fused.unsqueeze(0)).squeeze(0)  # [K, D]
+        attn_out = self.transformer(fused.unsqueeze(0)).squeeze(0)  # [K, D]
 
-        # 7) Back-project for compatibility
-        out_feats = self.back_proj(attn)        # [K, C_in]
+        # 7) Back-project to original channels
+        out_feats = self.back_proj(attn_out)        # [K, C_in]
+
         return out_feats, kept_coors
