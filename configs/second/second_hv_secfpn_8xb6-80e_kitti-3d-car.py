@@ -17,30 +17,50 @@ sparse_shape = [
     int((point_cloud_range[3] - point_cloud_range[0]) / voxel_size[0])
 ]
 
+train_pipeline = [
+    dict(type='LoadPointsFromFile', coord_type='LIDAR', load_dim=4, use_dim=4),
+    dict(type='LoadAnnotations3D', with_bbox_3d=True, with_label_3d=True),
+    dict(
+        type='RandomFlip3D',
+        sync_2d=False,
+        flip_ratio_bev_horizontal=0.5),
+    dict(
+        type='GlobalRotScaleTrans',
+        rot_range=[-0.78539816, 0.78539816],
+        scale_ratio_range=[0.95, 1.05]),
+    dict(type='PointsRangeFilter', point_cloud_range=point_cloud_range),
+    dict(type='ObjectRangeFilter', point_cloud_range=point_cloud_range),
+    dict(type='PointShuffle'),
+    dict(
+        type='Pack3DDetInputs',
+        keys=['points', 'gt_labels_3d', 'gt_bboxes_3d'])
+]
+
+
 model = dict(
     # FIX 1: Override the data_preprocessor to use the new voxel_size.
     # This ensures voxels are CREATED and INTERPRETED with the same dimensions.
-    # data_preprocessor=dict(
-    #     voxel_layer=dict(
-    #         voxel_size=voxel_size
-    #     )
-    # ),
+    data_preprocessor=dict(
+        voxel_layer=dict(
+            voxel_size=voxel_size
+        )
+    ),
     # Configure the custom AdaptiveVFE module as the new voxel_encoder.
-    # voxel_encoder=dict(
-    #     type='AdaptiveVFE',
-    #     base_vfe_cfg=dict(type='HardSimpleVFE', num_features=4),
-    #     embed_dims=256,
-    #     num_heads=8,
-    #     num_layers=3,
-    #     pos_encoding_cfg=dict(type='ConvBNPositionalEncoding', input_channel=3, num_pos_feats=256),
-    #     attention_threshold=0.5,
-    #     voxel_size=voxel_size,
-    #     point_cloud_range=point_cloud_range),
+    voxel_encoder=dict(
+        type='AdaptiveVFE',
+        base_vfe_cfg=dict(type='HardSimpleVFE', num_features=4),
+        embed_dims=256,
+        num_heads=8,
+        num_layers=3,
+        pos_encoding_cfg=dict(type='ConvBNPositionalEncoding', input_channel=3, num_pos_feats=256),
+        attention_threshold=0.5,
+        voxel_size=voxel_size,
+        point_cloud_range=point_cloud_range),
 
     # Override the middle_encoder with the new, correct sparse_shape.
-    # middle_encoder=dict(
-    #     sparse_shape=sparse_shape
-    # ),
+    middle_encoder=dict(
+        sparse_shape=sparse_shape
+    ),
 
     bbox_head=dict(
         type='Anchor3DHead',
