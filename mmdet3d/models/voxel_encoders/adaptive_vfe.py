@@ -188,6 +188,8 @@ class AdaptiveVFE(nn.Module):
         normed_features = torch.nn.functional.normalize(features_embed_dim, p=2, dim=1)
         return torch.mm(normed_features, normed_features.t())
 
+
+
     def adaptive_fusion(self, current_batch_features_embed, current_batch_coors, similarity_matrix):
         N_b = current_batch_features_embed.shape[0]
         if N_b == 0:
@@ -199,7 +201,6 @@ class AdaptiveVFE(nn.Module):
         if N_b > 1:
             significance_threshold_val = torch.quantile(significance_score.float(), self.significance_percentile)
         else:
-            # Handle case with 1 voxel where quantile is not well-defined
             significance_threshold_val = significance_score.item() + 1.0
 
         is_info_heavy = significance_score > significance_threshold_val
@@ -209,66 +210,52 @@ class AdaptiveVFE(nn.Module):
         final_features_list = [current_batch_features_embed[is_info_heavy]]
         final_coors_list = [current_batch_coors[is_info_heavy]]
         processed_mask[is_info_heavy] = True
-        
-        # Efficiently find neighbors for merge candidates
+
+        # Process candidates for merging or keeping
         candidates_indices = torch.where(~processed_mask)[0]
-        
-        # Only build neighbor map if there are candidates to merge
         if candidates_indices.numel() > 0:
             coors_zyx_in_batch = current_batch_coors[:, 1:4]
             map_coor_tuple_to_idx_in_batch = {tuple(c.tolist()): i for i, c in enumerate(coors_zyx_in_batch)}
-            
+
             for i_idx in candidates_indices:
                 if processed_mask[i_idx]:
                     continue
 
                 current_voxel_coor_zyx = coors_zyx_in_batch[i_idx]
-                
-                # Find best merge partner among adjacent, non-heavy, unprocessed voxels
                 best_merge_neighbor_idx = -1
                 max_similarity_with_neighbor = -float('inf')
-                
-                # Check 6-connectivity neighbors
+
                 for offset in [[1,0,0], [-1,0,0], [0,1,0], [0,-1,0], [0,0,1], [0,0,-1]]:
                     neighbor_coor = tuple((current_voxel_coor_zyx + torch.tensor(offset, device=i_idx.device)).tolist())
-                    
                     if neighbor_coor in map_coor_tuple_to_idx_in_batch:
                         j_idx = map_coor_tuple_to_idx_in_batch[neighbor_coor]
-                        # Check if neighbor is a valid merge target
-                        if not processed_mask[j_idx]: # and not is_info_heavy[j_idx] is implicitly true
+                        if not processed_mask[j_idx]:
                             similarity = similarity_matrix[i_idx, j_idx]
                             if similarity > max_similarity_with_neighbor:
                                 max_similarity_with_neighbor = similarity
                                 best_merge_neighbor_idx = j_idx
-                
-                # Perform merge or keep individually
+
                 if best_merge_neighbor_idx != -1 and max_similarity_with_neighbor > self.attention_threshold:
                     j_idx = best_merge_neighbor_idx
-                    # Merge (simple average)
                     merged_feature = (current_batch_features_embed[i_idx] + current_batch_features_embed[j_idx]) / 2.0
-                    
                     final_features_list.append(merged_feature.unsqueeze(0))
-                    final_coors_list.append(current_batch_coors[i_idx].unsqueeze(0)) # Keep original coordinate
-                    
+                    final_coors_list.append(current_batch_coors[i_idx].unsqueeze(0))
                     processed_mask[i_idx] = True
                     processed_mask[j_idx] = True
                 else:
-                    # Keep individual
                     final_features_list.append(current_batch_features_embed[i_idx].unsqueeze(0))
                     final_coors_list.append(current_batch_coors[i_idx].unsqueeze(0))
                     processed_mask[i_idx] = True
 
-        # FIX 2: Added a safeguard to prevent empty outputs.
-        # If the fusion logic discarded all voxels, this keeps the single most significant one.
-        if not final_features_list or all(t.numel() == 0 for t in final_features_list):
-            if N_b > 0:
-                logger.warning("AdaptiveVFE Safeguard: All voxels were discarded, keeping the most significant one.")
-                most_significant_idx = torch.argmax(significance_score)
-                final_features_list = [current_batch_features_embed[most_significant_idx].unsqueeze(0)]
-                final_coors_list = [current_batch_coors[most_significant_idx].unsqueeze(0)]
-            else:
-                return torch.empty((0, current_batch_features_embed.shape[1]), device=current_batch_features_embed.device), \
-                       torch.empty((0, current_batch_coors.shape[1]), dtype=current_batch_coors.dtype, device=current_batch_coors.device)
+        # Concatenate all gathered features and coordinates
+        final_features = torch.cat(final_features_list, dim=0)
+        final_coors = torch.cat(final_coors_list, dim=0)
 
-        return torch.cat(final_features_list, dim=0), torch.cat(final_coors_list, dim=0)
+        # FINAL SAFEGUARD: If the output is STILL empty, keep the single most significant voxel.
+        if final_features.shape[0] == 0 and N_b > 0:
+            logger.warning("AdaptiveVFE Safeguard (Post-Cat): All voxels were discarded, keeping the most significant one.")
+            most_significant_idx = torch.argmax(significance_score)
+            final_features = current_batch_features_embed[most_significant_idx].unsqueeze(0)
+            final_coors = current_batch_coors[most_significant_idx].unsqueeze(0)
 
+        return final_features, final_coors
