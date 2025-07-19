@@ -20,11 +20,11 @@ sparse_shape = [
 model = dict(
     # FIX 1: Override the data_preprocessor to use the new voxel_size.
     # This ensures voxels are CREATED and INTERPRETED with the same dimensions.
-    data_preprocessor=dict(
-        voxel_layer=dict(
-            voxel_size=voxel_size
-        )
-    ),
+    # data_preprocessor=dict(
+    #     voxel_layer=dict(
+    #         voxel_size=voxel_size
+    #     )
+    # ),
     # Configure the custom AdaptiveVFE module as the new voxel_encoder.
     # voxel_encoder=dict(
     #     type='AdaptiveVFE',
@@ -38,9 +38,9 @@ model = dict(
     #     point_cloud_range=point_cloud_range),
 
     # Override the middle_encoder with the new, correct sparse_shape.
-    middle_encoder=dict(
-        sparse_shape=sparse_shape
-    ),
+    # middle_encoder=dict(
+    #     sparse_shape=sparse_shape
+    # ),
 
     bbox_head=dict(
         type='Anchor3DHead',
