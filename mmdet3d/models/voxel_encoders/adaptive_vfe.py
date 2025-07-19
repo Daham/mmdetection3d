@@ -146,22 +146,41 @@ class AdaptiveVFE(nn.Module):
         return final_features_base_dim, final_fused_coors
 
 
+    # def get_voxel_centers(self, coors):
+    #     # Move tensors to device once to avoid repeated calls
+    #     device = coors.device
+    #     voxel_size_dev = self.voxel_size.to(device)
+    #     pc_range_min_dev = self.point_cloud_range[:3].to(device)
+
+    #     voxel_indices_bzyx = coors.float()
+        
+    #     # Order is [x, y, z]
+    #     offsets = torch.tensor([0.5], device=device)
+        
+    #     x_centers = (voxel_indices_bzyx[:, 3] + offsets) * voxel_size_dev[0] + pc_range_min_dev[0]
+    #     y_centers = (voxel_indices_bzyx[:, 2] + offsets) * voxel_size_dev[1] + pc_range_min_dev[1]
+    #     z_centers = (voxel_indices_bzyx[:, 1] + offsets) * voxel_size_dev[2] + pc_range_min_dev[2]
+
+    #     return torch.stack([x_centers, y_centers, z_centers], dim=1)
+    
     def get_voxel_centers(self, coors):
-        # Move tensors to device once to avoid repeated calls
+        """Calculates the center of voxels in real-world coordinates."""
         device = coors.device
+        # Ensure voxel_size and pc_range are on the correct device
         voxel_size_dev = self.voxel_size.to(device)
         pc_range_min_dev = self.point_cloud_range[:3].to(device)
 
-        voxel_indices_bzyx = coors.float()
-        
-        # Order is [x, y, z]
-        offsets = torch.tensor([0.5], device=device)
-        
-        x_centers = (voxel_indices_bzyx[:, 3] + offsets) * voxel_size_dev[0] + pc_range_min_dev[0]
-        y_centers = (voxel_indices_bzyx[:, 2] + offsets) * voxel_size_dev[1] + pc_range_min_dev[1]
-        z_centers = (voxel_indices_bzyx[:, 1] + offsets) * voxel_size_dev[2] + pc_range_min_dev[2]
+        # Get the z, y, x indices from coordinates
+        voxel_indices_zyx = coors[:, 1:4].float()
 
-        return torch.stack([x_centers, y_centers, z_centers], dim=1)
+        # Flip the order to x, y, z to match the convention of voxel_size and pc_range
+        voxel_indices_xyz = torch.flip(voxel_indices_zyx, dims=[1])
+
+        # Calculate all centers at once using broadcasting
+        # Formula: (index + 0.5) * size + minimum_range
+        centers = (voxel_indices_xyz + 0.5) * voxel_size_dev + pc_range_min_dev
+
+        return centers
 
     def compute_similarity_matrix(self, features_embed_dim):
         if features_embed_dim.shape[0] == 0:

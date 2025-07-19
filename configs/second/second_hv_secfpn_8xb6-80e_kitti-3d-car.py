@@ -4,7 +4,9 @@ _base_ = [
     '../_base_/default_runtime.py'
 ]
 # point_cloud_range=[0, -25, -1.5, 40, 25, 1.5]
-point_cloud_range=[0, -40, -3, 70.4, 40, 1],
+voxel_size = [0.5, 0.5, 0.5]
+point_cloud_range=[0, -40, -3, 70.4, 40, 1]
+
 model = dict(
     voxel_encoder=dict(
         type='AdaptiveVFE',
@@ -14,7 +16,7 @@ model = dict(
         num_layers=3,
         pos_encoding_cfg=dict(type='ConvBNPositionalEncoding', input_channel=3, num_pos_feats=256),
         attention_threshold=0.5,
-        voxel_size=[0.5, 0.5, 0.5],  # Pass voxel size for coordinate conversion
+        voxel_size=voxel_size,  # Pass voxel size for coordinate conversion
         point_cloud_range=point_cloud_range),  # Pass point cloud range
     bbox_head=dict(
         type='Anchor3DHead',
