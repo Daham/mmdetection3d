@@ -17,24 +17,28 @@ sparse_shape = [
     int((point_cloud_range[3] - point_cloud_range[0]) / voxel_size[0])
 ]
 
-train_pipeline = [
-    dict(type='LoadPointsFromFile', coord_type='LIDAR', load_dim=4, use_dim=4),
-    dict(type='LoadAnnotations3D', with_bbox_3d=True, with_label_3d=True),
-    dict(
-        type='RandomFlip3D',
-        sync_2d=False,
-        flip_ratio_bev_horizontal=0.5),
-    dict(
-        type='GlobalRotScaleTrans',
-        rot_range=[-0.78539816, 0.78539816],
-        scale_ratio_range=[0.95, 1.05]),
-    dict(type='PointsRangeFilter', point_cloud_range=point_cloud_range),
-    dict(type='ObjectRangeFilter', point_cloud_range=point_cloud_range),
-    dict(type='PointShuffle'),
-    dict(
-        type='Pack3DDetInputs',
-        keys=['points', 'gt_labels_3d', 'gt_bboxes_3d'])
-]
+train_dataloader = dict(
+    dataset=dict(
+        dataset=dict(
+            # This pipeline is simplified to remove the ObjectSample (db_sampler)
+            # and ObjectNoise steps, which can cause issues.
+            pipeline=[
+                dict(type='LoadPointsFromFile', coord_type='LIDAR', load_dim=4, use_dim=4),
+                dict(type='LoadAnnotations3D', with_bbox_3d=True, with_label_3d=True),
+                dict(
+                    type='RandomFlip3D',
+                    flip_ratio_bev_horizontal=0.5),
+                dict(
+                    type='GlobalRotScaleTrans',
+                    rot_range=[-0.78539816, 0.78539816],
+                    scale_ratio_range=[0.95, 1.05]),
+                dict(type='PointsRangeFilter', point_cloud_range=point_cloud_range),
+                dict(type='ObjectRangeFilter', point_cloud_range=point_cloud_range),
+                dict(type='PointShuffle'),
+                dict(
+                    type='Pack3DDetInputs',
+                    keys=['points', 'gt_labels_3d', 'gt_bboxes_3d'])
+            ])))
 
 
 model = dict(
