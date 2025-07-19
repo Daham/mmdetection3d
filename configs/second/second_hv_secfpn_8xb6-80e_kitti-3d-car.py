@@ -7,7 +7,25 @@ _base_ = [
 voxel_size = [0.5, 0.5, 0.5]
 point_cloud_range=[0, -40, -3, 70.4, 40, 1]
 
+# FIX 3: Recalculate the sparse_shape for the middle_encoder based on the new voxel_size.
+# The original shape [41, 1600, 1408] was based on a 0.05m voxel size.
+# This new shape [9, 160, 141] matches the 0.5m voxel size and prevents memory errors.
+# The order is [z, y, x].
+sparse_shape = [
+    int((point_cloud_range[5] - point_cloud_range[2]) / voxel_size[2]) + 1,
+    int((point_cloud_range[4] - point_cloud_range[1]) / voxel_size[1]),
+    int((point_cloud_range[3] - point_cloud_range[0]) / voxel_size[0])
+]
+
 model = dict(
+    # FIX 1: Override the data_preprocessor to use the new voxel_size.
+    # This ensures voxels are CREATED and INTERPRETED with the same dimensions.
+    data_preprocessor=dict(
+        voxel_layer=dict(
+            voxel_size=voxel_size
+        )
+    ),
+    # Configure the custom AdaptiveVFE module as the new voxel_encoder.
     voxel_encoder=dict(
         type='AdaptiveVFE',
         base_vfe_cfg=dict(type='HardSimpleVFE', num_features=4),
@@ -16,8 +34,14 @@ model = dict(
         num_layers=3,
         pos_encoding_cfg=dict(type='ConvBNPositionalEncoding', input_channel=3, num_pos_feats=256),
         attention_threshold=0.5,
-        voxel_size=voxel_size,  # Pass voxel size for coordinate conversion
-        point_cloud_range=point_cloud_range),  # Pass point cloud range
+        voxel_size=voxel_size,
+        point_cloud_range=point_cloud_range),
+
+    # Override the middle_encoder with the new, correct sparse_shape.
+    middle_encoder=dict(
+        sparse_shape=sparse_shape
+    ),
+
     bbox_head=dict(
         type='Anchor3DHead',
         num_classes=1,
