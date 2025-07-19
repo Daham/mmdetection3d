@@ -273,7 +273,6 @@
 import torch
 import torch.nn as nn
 from mmdet3d.registry import MODELS
-from mmengine.logging import print_log
 
 @MODELS.register_module()
 class AdaptiveVFE(nn.Module):
@@ -285,6 +284,7 @@ class AdaptiveVFE(nn.Module):
         4) Positional encoding via MLP on real-world voxel centers
         5) Local self-attention using a TransformerEncoder
         6) Back-projection to original feature channels for compatibility
+    Simple print logging is used for insights.
     """
     def __init__(
         self,
@@ -297,21 +297,21 @@ class AdaptiveVFE(nn.Module):
         point_cloud_range=(0.0, -40.0, -3.0)
     ):
         super().__init__()
-        # 1) Build base VFE (e.g. HardSimpleVFE) for initial feature extraction
+        # 1) Build base VFE (e.g. HardSimpleVFE)
         self.base_vfe = MODELS.build(base_vfe_cfg)
         in_ch = getattr(self.base_vfe, 'out_channels', base_vfe_cfg.get('num_features'))
 
-        # 2) Linear layer to project to embed_dims for attention
+        # 2) Projection to embed_dims
         self.proj = nn.Linear(in_ch, embed_dims)
 
-        # 3) MLP for positional encoding of (x, y, z) centers
+        # 3) Positional MLP for (x,y,z)
         self.pos_mlp = nn.Sequential(
             nn.Linear(3, embed_dims),
             nn.ReLU(inplace=True),
             nn.Linear(embed_dims, embed_dims),
         )
 
-        # 4) Transformer for local self-attention among pruned voxels
+        # 4) Transformer for local self-attention
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=embed_dims,
             nhead=num_heads,
@@ -320,64 +320,57 @@ class AdaptiveVFE(nn.Module):
         )
         self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
 
-        # 5) Back-projection to original number of channels
+        # 5) Back-projection to original channel dim
         self.back_proj = nn.Linear(embed_dims, in_ch)
 
-        # Ratio of voxels to keep after early pruning
+        # Ratio for early pruning
         self.keep_ratio = keep_ratio
 
-        # Buffers for converting voxel grid to real-world coordinates
+        # Buffers for voxel->world coordinate conversion
         self.register_buffer('voxel_size', torch.tensor(voxel_size).float())
         self.register_buffer('pc_range', torch.tensor(point_cloud_range).float())
 
     def forward(self, features, num_points, coors):
         """
         Args:
-            features (Tensor[N, M, C_in]): raw per-point features in each voxel
-            num_points (Tensor[N]): number of valid points per voxel
-            coors (Tensor[N, 4]): voxel grid coords (batch_idx, z, y, x)
+            features (Tensor[N, M, C_in]): per-point inputs
+            num_points (Tensor[N]): valid points per voxel
+            coors (Tensor[N, 4]): (batch, z, y, x)
         Returns:
-            Tuple:
-                out_feats (Tensor[K, C_in]): processed features of pruned voxels
-                pruned_coors (Tensor[K, 4]): coordinates of kept voxels
+            Tuple of (out_feats: Tensor[K, C_in], pruned_coors: Tensor[K,4])
         """
-        # 1) Extract base features for each voxel
+        # 1) Base VFE
         base_feats = self.base_vfe(features, num_points, coors)  # [N, C_in]
 
-        # 2) Early pruning: keep only top-scoring voxels by L2 norm
-        scores = base_feats.norm(p=2, dim=1)  # [N]
+        # 2) Early pruning based on L2 norm
+        scores = base_feats.norm(p=2, dim=1)
         total = scores.size(0)
         keep_k = max(int(total * self.keep_ratio), 1)
-        _, keep_idxs = torch.topk(scores, keep_k, sorted=False)
-        pruned_feats = base_feats[keep_idxs]  # [K, C_in]
-        pruned_coors = coors[keep_idxs]       # [K, 4]
+        _, idxs = torch.topk(scores, keep_k, sorted=False)
+        pruned_feats = base_feats[idxs]    # [K, C_in]
+        pruned_coors = coors[idxs]         # [K, 4]
 
-        # Log pruning stats
-        print_log(
-            f"[AdaptiveVFE] early prune: {total} -> {keep_k} voxels",
-            logger=__name__,
-            level='INFO'
-        )
+        # Simple print log
+        print(f"[AdaptiveVFE] early prune: {total} -> {keep_k} voxels")
 
-        # 3) Project to embedding dim
+        # 3) Projection
         proj_feats = self.proj(pruned_feats)  # [K, D]
 
-        # 4) Positional encoding using voxel centers
+        # 4) Positional encoding
         centers = (
             pruned_coors[:, 1:].float() * self.voxel_size
             + self.pc_range.unsqueeze(0)
             + self.voxel_size.unsqueeze(0) * 0.5
-        )  # [K, 3]
-        pos_feats = self.pos_mlp(centers)  # [K, D]
+        )  # [K,3]
+        pos_feats = self.pos_mlp(centers)     # [K, D]
 
-        # Sum projected and positional features
-        fused = proj_feats + pos_feats  # [K, D]
+        # Fuse features
+        fused = proj_feats + pos_feats        # [K, D]
 
-        # 5) Local self-attention
-        attn_in = fused.unsqueeze(0)  # [1, K, D]
-        attn_out = self.transformer(attn_in).squeeze(0)  # [K, D]
+        # 5) Self-attention (local)
+        attn_out = self.transformer(fused.unsqueeze(0)).squeeze(0)  # [K, D]
 
-        # 6) Back-project to original feature channels
+        # 6) Back-project to match SparseEncoder in_channels
         out_feats = self.back_proj(attn_out)  # [K, C_in]
 
         return out_feats, pruned_coors
