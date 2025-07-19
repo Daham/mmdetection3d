@@ -355,7 +355,7 @@ class AdaptiveVFE(nn.Module):
         # Log pruning stats
         print_log(
             f"[AdaptiveVFE] early prune: {total} -> {keep_k} voxels",
-            logger='mmdet3d',
+            logger=__name__,
             level='INFO'
         )
 
