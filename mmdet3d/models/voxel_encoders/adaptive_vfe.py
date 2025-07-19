@@ -279,12 +279,13 @@ class AdaptiveVFE(nn.Module):
     """
     Adaptive Voxel Feature Encoder with:
         1) Base VFE to extract initial voxel features
-        2) Early percentile-based pruning to reduce number of voxels
-        3) Linear projection to higher-dimensional embeddings
-        4) Positional encoding via MLP on real-world voxel centers
-        5) Local self-attention using a TransformerEncoder
-        6) Back-projection to original feature channels for compatibility
-    Simple print logging is used for insights.
+        2) Early percentile-based pruning to select top-scoring voxels
+        3) Merging dropped voxels into nearest kept voxel (adaptive fusion)
+        4) Linear projection to higher-dimensional embeddings
+        5) Positional encoding via MLP on real-world voxel centers
+        6) Local self-attention using TransformerEncoder
+        7) Back-projection to original feature channels for compatibility
+    Simple print logging for insights.
     """
     def __init__(
         self,
@@ -297,21 +298,19 @@ class AdaptiveVFE(nn.Module):
         point_cloud_range=(0.0, -40.0, -3.0)
     ):
         super().__init__()
-        # 1) Build base VFE (e.g. HardSimpleVFE)
+        # 1) Base VFE
         self.base_vfe = MODELS.build(base_vfe_cfg)
-        in_ch = getattr(self.base_vfe, 'out_channels', base_vfe_cfg.get('num_features'))
+        self.in_ch = getattr(self.base_vfe, 'out_channels', base_vfe_cfg.get('num_features'))
 
-        # 2) Projection to embed_dims
-        self.proj = nn.Linear(in_ch, embed_dims)
-
-        # 3) Positional MLP for (x,y,z)
+        # 2) Projection to embedding dimension
+        self.proj = nn.Linear(self.in_ch, embed_dims)
+        # 3) Positional encoding MLP
         self.pos_mlp = nn.Sequential(
             nn.Linear(3, embed_dims),
             nn.ReLU(inplace=True),
             nn.Linear(embed_dims, embed_dims),
         )
-
-        # 4) Transformer for local self-attention
+        # 4) Transformer for self-attention
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=embed_dims,
             nhead=num_heads,
@@ -319,58 +318,66 @@ class AdaptiveVFE(nn.Module):
             batch_first=True
         )
         self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
-
-        # 5) Back-projection to original channel dim
-        self.back_proj = nn.Linear(embed_dims, in_ch)
-
-        # Ratio for early pruning
+        # 5) Back-projection to original channels
+        self.back_proj = nn.Linear(embed_dims, self.in_ch)
+        # Pruning ratio
         self.keep_ratio = keep_ratio
-
-        # Buffers for voxel->world coordinate conversion
+        # Buffers for coordinate conversion
         self.register_buffer('voxel_size', torch.tensor(voxel_size).float())
         self.register_buffer('pc_range', torch.tensor(point_cloud_range).float())
 
     def forward(self, features, num_points, coors):
         """
         Args:
-            features (Tensor[N, M, C_in]): per-point inputs
+            features (Tensor[N, M, C_in]): raw per-point features
             num_points (Tensor[N]): valid points per voxel
-            coors (Tensor[N, 4]): (batch, z, y, x)
+            coors (Tensor[N, 4]): voxel coords (batch, z, y, x)
         Returns:
-            Tuple of (out_feats: Tensor[K, C_in], pruned_coors: Tensor[K,4])
+            out_feats (Tensor[K, C_in]), pruned_coors (Tensor[K, 4])
         """
-        # 1) Base VFE
+        # 1) Extract base features
         base_feats = self.base_vfe(features, num_points, coors)  # [N, C_in]
 
-        # 2) Early pruning based on L2 norm
+        # 2) Early pruning: keep top scores
         scores = base_feats.norm(p=2, dim=1)
-        total = scores.size(0)
-        keep_k = max(int(total * self.keep_ratio), 1)
-        _, idxs = torch.topk(scores, keep_k, sorted=False)
-        pruned_feats = base_feats[idxs]    # [K, C_in]
-        pruned_coors = coors[idxs]         # [K, 4]
+        N = scores.size(0)
+        K = max(int(N * self.keep_ratio), 1)
+        # indices to keep and drop
+        topk_vals, keep_idx = torch.topk(scores, K, sorted=False)
+        drop_idx = torch.arange(N, device=scores.device)
+        drop_idx = drop_idx[~torch.isin(drop_idx, keep_idx)]
+        kept_feats = base_feats[keep_idx]       # [K, C_in]
+        kept_coors = coors[keep_idx]            # [K, 4]
+        dropped_feats = base_feats[drop_idx]    # [N-K, C_in]
 
-        # Simple print log
-        print(f"[AdaptiveVFE] early prune: {total} -> {keep_k} voxels")
+        print(f"[AdaptiveVFE] early prune: {N} -> {K} voxels, merging {len(drop_idx)}")
 
-        # 3) Projection
-        proj_feats = self.proj(pruned_feats)  # [K, D]
+        # 3) Merge dropped into nearest kept by cosine similarity
+        # normalize for cosine sim
+        kept_norm = nn.functional.normalize(kept_feats, dim=1)
+        dropped_norm = nn.functional.normalize(dropped_feats, dim=1)
+        # cosine similarities [N-K, K]
+        sims = torch.matmul(dropped_norm, kept_norm.t())
+        # find best match for each dropped voxel
+        best_idx = sims.argmax(dim=1)
+        # accumulate dropped into kept
+        for di, ki in enumerate(best_idx):
+            kept_feats[ki] = (kept_feats[ki] + dropped_feats[di]) * 0.5
 
-        # 4) Positional encoding
+        # 4) Projection to embed dims
+        proj = self.proj(kept_feats)            # [K, D]
+        # 5) Positional encoding
         centers = (
-            pruned_coors[:, 1:].float() * self.voxel_size
+            kept_coors[:, 1:].float() * self.voxel_size
             + self.pc_range.unsqueeze(0)
             + self.voxel_size.unsqueeze(0) * 0.5
         )  # [K,3]
-        pos_feats = self.pos_mlp(centers)     # [K, D]
+        pos = self.pos_mlp(centers)             # [K, D]
+        fused = proj + pos                      # [K, D]
 
-        # Fuse features
-        fused = proj_feats + pos_feats        # [K, D]
+        # 6) Local self-attention
+        attn = self.transformer(fused.unsqueeze(0)).squeeze(0)  # [K, D]
 
-        # 5) Self-attention (local)
-        attn_out = self.transformer(fused.unsqueeze(0)).squeeze(0)  # [K, D]
-
-        # 6) Back-project to match SparseEncoder in_channels
-        out_feats = self.back_proj(attn_out)  # [K, C_in]
-
-        return out_feats, pruned_coors
+        # 7) Back-project for compatibility
+        out_feats = self.back_proj(attn)        # [K, C_in]
+        return out_feats, kept_coors
