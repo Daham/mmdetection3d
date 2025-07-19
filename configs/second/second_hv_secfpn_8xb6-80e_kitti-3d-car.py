@@ -26,16 +26,16 @@ model = dict(
         )
     ),
     # Configure the custom AdaptiveVFE module as the new voxel_encoder.
-    voxel_encoder=dict(
-        type='AdaptiveVFE',
-        base_vfe_cfg=dict(type='HardSimpleVFE', num_features=4),
-        embed_dims=256,
-        num_heads=8,
-        num_layers=3,
-        pos_encoding_cfg=dict(type='ConvBNPositionalEncoding', input_channel=3, num_pos_feats=256),
-        attention_threshold=0.5,
-        voxel_size=voxel_size,
-        point_cloud_range=point_cloud_range),
+    # voxel_encoder=dict(
+    #     type='AdaptiveVFE',
+    #     base_vfe_cfg=dict(type='HardSimpleVFE', num_features=4),
+    #     embed_dims=256,
+    #     num_heads=8,
+    #     num_layers=3,
+    #     pos_encoding_cfg=dict(type='ConvBNPositionalEncoding', input_channel=3, num_pos_feats=256),
+    #     attention_threshold=0.5,
+    #     voxel_size=voxel_size,
+    #     point_cloud_range=point_cloud_range),
 
     # Override the middle_encoder with the new, correct sparse_shape.
     middle_encoder=dict(
