@@ -1,5 +1,4 @@
-# voxel_size=[0.5, 0.5, 0.5],
-voxel_size = [0.25, 0.25, 0.25]
+voxel_size = [0.05, 0.05, 0.1]
 
 model = dict(
     type='VoxelNet',
@@ -8,14 +7,14 @@ model = dict(
         voxel=True,
         voxel_layer=dict(
             max_num_points=5,
-            point_cloud_range=[0, -40.0, -3.0, 70.4, 40.0, 1.0], # Standard KITTI range
+            point_cloud_range=[0, -40, -3, 70.4, 40, 1],
             voxel_size=voxel_size,
             max_voxels=(16000, 40000))),
     voxel_encoder=dict(type='HardSimpleVFE'),
     middle_encoder=dict(
         type='SparseEncoder',
         in_channels=4,
-        sparse_shape=[16, 320, 282],
+        sparse_shape=[41, 1600, 1408],
         order=('conv', 'norm', 'act')),
     backbone=dict(
         type='SECOND',
@@ -36,15 +35,10 @@ model = dict(
         use_direction_classifier=True,
         anchor_generator=dict(
             type='Anchor3DRangeGenerator',
-            # ranges=[
-            #     [0, -40.0, -0.6, 70.4, 40.0, -0.6],
-            #     [0, -40.0, -0.6, 70.4, 40.0, -0.6],
-            #     [0, -40.0, -1.78, 70.4, 40.0, -1.78],
-            # ],
             ranges=[
-                [0, -40.0, -0.6, 70.4, 40.0, -0.1],   # pedestrian
-                [0, -40.0, -0.6, 70.4, 40.0, -0.1],   # cyclist
-                [0, -40.0, -3.0, 70.4, 40.0, 1.0],    # car
+                [0, -40.0, -0.6, 70.4, 40.0, -0.6],
+                [0, -40.0, -0.6, 70.4, 40.0, -0.6],
+                [0, -40.0, -1.78, 70.4, 40.0, -1.78],
             ],
             sizes=[[0.8, 0.6, 1.73], [1.76, 0.6, 1.73], [3.9, 1.6, 1.56]],
             rotations=[0, 1.57],
