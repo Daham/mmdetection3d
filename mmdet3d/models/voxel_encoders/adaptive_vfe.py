@@ -270,119 +270,114 @@
 
 # mmdet3d/models/voxel_encoders/adaptive_vfe.py
 
-import logging
 import torch
 import torch.nn as nn
 from mmdet3d.registry import MODELS
+from mmengine.logging import print_log
 
 @MODELS.register_module()
 class AdaptiveVFE(nn.Module):
     """
     Adaptive Voxel Feature Encoder with:
-    1) Base VFE (e.g., HardSimpleVFE)
-    2) Linear projection to embed_dims
-    3) Positional MLP encoding of real-world voxel centers
-    4) Local self-attention (TransformerEncoder)
-    5) Percentile-based pruning to top keep_ratio voxels
-    6) Back-projection to original feature channels
+        1) Base VFE to extract initial voxel features
+        2) Early percentile-based pruning to reduce number of voxels
+        3) Linear projection to higher-dimensional embeddings
+        4) Positional encoding via MLP on real-world voxel centers
+        5) Local self-attention using a TransformerEncoder
+        6) Back-projection to original feature channels for compatibility
     """
-    def __init__(self,
-                 base_vfe_cfg=dict(type='HardSimpleVFE', num_features=4),
-                 embed_dims=256,
-                 num_heads=8,
-                 num_layers=2,
-                 keep_ratio=0.5,
-                 voxel_size=(0.05, 0.05, 0.1),
-                 point_cloud_range=(0.0, -40.0, -3.0)):
+    def __init__(
+        self,
+        base_vfe_cfg=dict(type='HardSimpleVFE', num_features=4),
+        embed_dims=128,
+        num_heads=4,
+        num_layers=1,
+        keep_ratio=0.2,
+        voxel_size=(0.05, 0.05, 0.1),
+        point_cloud_range=(0.0, -40.0, -3.0)
+    ):
         super().__init__()
-        # 1) Base VFE
+        # 1) Build base VFE (e.g. HardSimpleVFE) for initial feature extraction
         self.base_vfe = MODELS.build(base_vfe_cfg)
-        in_ch = getattr(self.base_vfe, 'out_channels',
-                        base_vfe_cfg.get('num_features'))
+        in_ch = getattr(self.base_vfe, 'out_channels', base_vfe_cfg.get('num_features'))
 
-        # 2) Feature projection
+        # 2) Linear layer to project to embed_dims for attention
         self.proj = nn.Linear(in_ch, embed_dims)
 
-        # 3) Positional MLP
+        # 3) MLP for positional encoding of (x, y, z) centers
         self.pos_mlp = nn.Sequential(
             nn.Linear(3, embed_dims),
             nn.ReLU(inplace=True),
             nn.Linear(embed_dims, embed_dims),
         )
 
-        # 4) Local self-attention
+        # 4) Transformer for local self-attention among pruned voxels
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=embed_dims,
             nhead=num_heads,
             dim_feedforward=embed_dims * 2,
-            dropout=0.1,
-            activation='relu',
             batch_first=True
         )
-        self.transformer = nn.TransformerEncoder(
-            encoder_layer, num_layers=num_layers
-        )
+        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
 
-        # 5) Back-projection
+        # 5) Back-projection to original number of channels
         self.back_proj = nn.Linear(embed_dims, in_ch)
 
-        # 6) Pruning ratio
+        # Ratio of voxels to keep after early pruning
         self.keep_ratio = keep_ratio
 
-        # Geometry buffers for center computation
+        # Buffers for converting voxel grid to real-world coordinates
         self.register_buffer('voxel_size', torch.tensor(voxel_size).float())
         self.register_buffer('pc_range', torch.tensor(point_cloud_range).float())
-
-        # Logger
-        self.logger = logging.getLogger(__name__)
 
     def forward(self, features, num_points, coors):
         """
         Args:
-            features (Tensor[N, M, C_in]): raw per-point features per voxel
+            features (Tensor[N, M, C_in]): raw per-point features in each voxel
             num_points (Tensor[N]): number of valid points per voxel
-            coors (Tensor[N, 4]): (batch_idx, z, y, x)
+            coors (Tensor[N, 4]): voxel grid coords (batch_idx, z, y, x)
         Returns:
             Tuple:
-                out_feats (Tensor[K, C_in]): pruned voxel features
-                pruned_coors (Tensor[K, 4]): corresponding coords
+                out_feats (Tensor[K, C_in]): processed features of pruned voxels
+                pruned_coors (Tensor[K, 4]): coordinates of kept voxels
         """
-        # Base VFE
-        base_feats = self.base_vfe(features, num_points, coors)  # [N, in_ch]
+        # 1) Extract base features for each voxel
+        base_feats = self.base_vfe(features, num_points, coors)  # [N, C_in]
 
-        # Projection
-        proj_feats = self.proj(base_feats)  # [N, D]
+        # 2) Early pruning: keep only top-scoring voxels by L2 norm
+        scores = base_feats.norm(p=2, dim=1)  # [N]
+        total = scores.size(0)
+        keep_k = max(int(total * self.keep_ratio), 1)
+        _, keep_idxs = torch.topk(scores, keep_k, sorted=False)
+        pruned_feats = base_feats[keep_idxs]  # [K, C_in]
+        pruned_coors = coors[keep_idxs]       # [K, 4]
 
-        # Positional encoding
-        centers = (coors[:, 1:].float() * self.voxel_size
-                   + self.pc_range.unsqueeze(0)
-                   + self.voxel_size.unsqueeze(0) * 0.5)  # [N,3]
-        pos_feats = self.pos_mlp(centers)  # [N, D]
+        # Log pruning stats
+        print_log(
+            f"[AdaptiveVFE] early prune: {total} -> {keep_k} voxels",
+            logger='mmdet3d',
+            level='INFO'
+        )
 
-        # Fuse features
-        fused = proj_feats + pos_feats  # [N, D]
+        # 3) Project to embedding dim
+        proj_feats = self.proj(pruned_feats)  # [K, D]
 
-        # Self-attention
-        seq = fused.unsqueeze(0)  # [1, N, D]
-        attn_out = self.transformer(seq)  # [1, N, D]
-        attn_out = attn_out.squeeze(0)  # [N, D]
+        # 4) Positional encoding using voxel centers
+        centers = (
+            pruned_coors[:, 1:].float() * self.voxel_size
+            + self.pc_range.unsqueeze(0)
+            + self.voxel_size.unsqueeze(0) * 0.5
+        )  # [K, 3]
+        pos_feats = self.pos_mlp(centers)  # [K, D]
 
-        # Scoring & pruning
-        scores = attn_out.norm(p=2, dim=1)  # [N]
-        num_voxels = scores.numel()
-        num_keep = max(int(num_voxels * self.keep_ratio), 1)
-        _, keep_idxs = torch.topk(scores, num_keep, sorted=False)
+        # Sum projected and positional features
+        fused = proj_feats + pos_feats  # [K, D]
 
-        pruned_feats = attn_out[keep_idxs]  # [K, D]
-        pruned_coors = coors[keep_idxs]     # [K, 4]
+        # 5) Local self-attention
+        attn_in = fused.unsqueeze(0)  # [1, K, D]
+        attn_out = self.transformer(attn_in).squeeze(0)  # [K, D]
 
-        # Back-projection
-        out_feats = self.back_proj(pruned_feats)  # [K, in_ch]
-
-        # Logging
-        if self.training:
-            self.logger.info(
-                f"[AdaptiveVFE] voxels {num_voxels} → kept {num_keep}"
-            )
+        # 6) Back-project to original feature channels
+        out_feats = self.back_proj(attn_out)  # [K, C_in]
 
         return out_feats, pruned_coors
