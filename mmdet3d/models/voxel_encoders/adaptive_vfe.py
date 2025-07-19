@@ -21,10 +21,10 @@ class AdaptiveVFE(nn.Module):
                  num_heads=8,
                  num_layers=3,
                  pos_encoding_cfg=dict(type='ConvBNPositionalEncoding', input_channel=3, num_pos_feats=256),
-                 attention_threshold=0.5,
+                 attention_threshold=0.3,
+                 significance_percentile=0.5,
                  voxel_size=[0.05, 0.05, 0.1],
                  point_cloud_range=[0, -40, -3, 70.4, 40, 1],
-                 significance_percentile=0.7
                 ):
         super().__init__()
 
@@ -258,8 +258,17 @@ class AdaptiveVFE(nn.Module):
                     final_coors_list.append(current_batch_coors[i_idx].unsqueeze(0))
                     processed_mask[i_idx] = True
 
-        if not final_features_list:
-             return torch.empty((0, current_batch_features_embed.shape[1]), device=current_batch_features_embed.device), \
-                   torch.empty((0, current_batch_coors.shape[1]), dtype=current_batch_coors.dtype, device=current_batch_coors.device)
+        # FIX 2: Added a safeguard to prevent empty outputs.
+        # If the fusion logic discarded all voxels, this keeps the single most significant one.
+        if not final_features_list or all(t.numel() == 0 for t in final_features_list):
+            if N_b > 0:
+                logger.warning("AdaptiveVFE Safeguard: All voxels were discarded, keeping the most significant one.")
+                most_significant_idx = torch.argmax(significance_score)
+                final_features_list = [current_batch_features_embed[most_significant_idx].unsqueeze(0)]
+                final_coors_list = [current_batch_coors[most_significant_idx].unsqueeze(0)]
+            else:
+                return torch.empty((0, current_batch_features_embed.shape[1]), device=current_batch_features_embed.device), \
+                       torch.empty((0, current_batch_coors.shape[1]), dtype=current_batch_coors.dtype, device=current_batch_coors.device)
 
         return torch.cat(final_features_list, dim=0), torch.cat(final_coors_list, dim=0)
+
