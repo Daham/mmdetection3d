@@ -278,81 +278,111 @@ from mmdet3d.registry import MODELS
 @MODELS.register_module()
 class AdaptiveVFE(nn.Module):
     """
-    VFE + positional MLP + local self‑attention (TransformerEncoder),
-    with back‑projection so downstream dims still match.
+    Adaptive Voxel Feature Encoder with:
+    1) Base VFE (e.g., HardSimpleVFE)
+    2) Linear projection to embed_dims
+    3) Positional MLP encoding of real-world voxel centers
+    4) Local self-attention (TransformerEncoder)
+    5) Percentile-based pruning to top keep_ratio voxels
+    6) Back-projection to original feature channels
     """
     def __init__(self,
                  base_vfe_cfg=dict(type='HardSimpleVFE', num_features=4),
                  embed_dims=256,
                  num_heads=8,
                  num_layers=2,
+                 keep_ratio=0.5,
                  voxel_size=(0.05, 0.05, 0.1),
-                 point_cloud_range=(0, -40, -3)):
+                 point_cloud_range=(0.0, -40.0, -3.0)):
         super().__init__()
-        # 1) base VFE
+        # 1) Base VFE
         self.base_vfe = MODELS.build(base_vfe_cfg)
         in_ch = getattr(self.base_vfe, 'out_channels',
                         base_vfe_cfg.get('num_features'))
 
-        # 2) project -> embed_dims
+        # 2) Feature projection
         self.proj = nn.Linear(in_ch, embed_dims)
-        # 3) positional MLP
+
+        # 3) Positional MLP
         self.pos_mlp = nn.Sequential(
             nn.Linear(3, embed_dims),
             nn.ReLU(inplace=True),
             nn.Linear(embed_dims, embed_dims),
         )
-        # 4) Transformer stack for local self‑attention
+
+        # 4) Local self-attention
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=embed_dims,
             nhead=num_heads,
-            dim_feedforward=embed_dims*2,
+            dim_feedforward=embed_dims * 2,
             dropout=0.1,
-            activation='relu')
+            activation='relu',
+            batch_first=True
+        )
         self.transformer = nn.TransformerEncoder(
-            encoder_layer, num_layers=num_layers)
+            encoder_layer, num_layers=num_layers
+        )
 
-        # 5) back‑project to original channels
+        # 5) Back-projection
         self.back_proj = nn.Linear(embed_dims, in_ch)
 
-        # geometry buffers
+        # 6) Pruning ratio
+        self.keep_ratio = keep_ratio
+
+        # Geometry buffers for center computation
         self.register_buffer('voxel_size', torch.tensor(voxel_size).float())
         self.register_buffer('pc_range', torch.tensor(point_cloud_range).float())
 
-        # logger
+        # Logger
         self.logger = logging.getLogger(__name__)
 
     def forward(self, features, num_points, coors):
+        """
+        Args:
+            features (Tensor[N, M, C_in]): raw per-point features per voxel
+            num_points (Tensor[N]): number of valid points per voxel
+            coors (Tensor[N, 4]): (batch_idx, z, y, x)
+        Returns:
+            Tuple:
+                out_feats (Tensor[K, C_in]): pruned voxel features
+                pruned_coors (Tensor[K, 4]): corresponding coords
+        """
         # Base VFE
         base_feats = self.base_vfe(features, num_points, coors)  # [N, in_ch]
 
-        # Project + positional
-        proj_feats = self.proj(base_feats)                      # [N, D]
+        # Projection
+        proj_feats = self.proj(base_feats)  # [N, D]
+
+        # Positional encoding
         centers = (coors[:, 1:].float() * self.voxel_size
                    + self.pc_range.unsqueeze(0)
-                   + self.voxel_size.unsqueeze(0) * 0.5)      # [N,3]
-        pos_feats = self.pos_mlp(centers)                       # [N, D]
-        fused = proj_feats + pos_feats                          # [N, D]
+                   + self.voxel_size.unsqueeze(0) * 0.5)  # [N,3]
+        pos_feats = self.pos_mlp(centers)  # [N, D]
 
-        # Self-attention: treat all N voxels as a sequence
-        # Transformer expects shape (seq_len, batch, embed_dim), so:
-        seq = fused.unsqueeze(1)        # [N, 1, D]
-        attn_out = self.transformer(seq) # [N, 1, D]
-        attn_out = attn_out.squeeze(1)  # [N, D]
+        # Fuse features
+        fused = proj_feats + pos_feats  # [N, D]
 
-        # Back-project so SparseEncoder still sees the same in_ch
-        out_feats = self.back_proj(attn_out)                   # [N, in_ch]
+        # Self-attention
+        seq = fused.unsqueeze(0)  # [1, N, D]
+        attn_out = self.transformer(seq)  # [1, N, D]
+        attn_out = attn_out.squeeze(0)  # [N, D]
 
-        # Logging for insight
+        # Scoring & pruning
+        scores = attn_out.norm(p=2, dim=1)  # [N]
+        num_voxels = scores.numel()
+        num_keep = max(int(num_voxels * self.keep_ratio), 1)
+        _, keep_idxs = torch.topk(scores, num_keep, sorted=False)
+
+        pruned_feats = attn_out[keep_idxs]  # [K, D]
+        pruned_coors = coors[keep_idxs]     # [K, 4]
+
+        # Back-projection
+        out_feats = self.back_proj(pruned_feats)  # [K, in_ch]
+
+        # Logging
         if self.training:
             self.logger.info(
-                f"[AdaptiveVFE] proj_feats  — mean {proj_feats.mean():.4f}, std {proj_feats.std():.4f}")
-            self.logger.info(
-                f"[AdaptiveVFE] pos_feats   — mean {pos_feats.mean():.4f}, std {pos_feats.std():.4f}")
-            self.logger.info(
-                f"[AdaptiveVFE] fused_embedding — mean {fused.mean():.4f}, std {fused.std():.4f}")
-            self.logger.info(
-                f"[AdaptiveVFE] after_attn — mean {attn_out.mean():.4f}, std {attn_out.std():.4f}")
-            self.logger.info(f"[AdaptiveVFE] voxel count: {out_feats.shape[0]}")
+                f"[AdaptiveVFE] voxels {num_voxels} → kept {num_keep}"
+            )
 
-        return out_feats, coors
+        return out_feats, pruned_coors
