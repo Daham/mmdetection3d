@@ -264,29 +264,88 @@
 
 
 
+# mmdet3d/models/voxel_encoders/adaptive_vfe.py
+
+import logging
+import torch
 import torch.nn as nn
 from mmdet3d.registry import MODELS
 
 @MODELS.register_module()
 class AdaptiveVFE(nn.Module):
-    """Minimal pass‑through VFE: applies base VFE and returns features + coords."""
+    """
+    Voxel Feature Encoder with:
+      1) Base VFE (e.g. HardSimpleVFE)
+      2) Linear projection to embed_dims
+      3) Positional MLP encoding of real‑world voxel centers
+      4) Sum of the two as final embedding
+    Logs means & stds of each component for debugging.
+    """
     def __init__(self,
-                 base_vfe_cfg=dict(type='HardSimpleVFE', num_features=4)):
+                 base_vfe_cfg=dict(type='HardSimpleVFE', num_features=4),
+                 embed_dims=256,
+                 voxel_size=(0.05, 0.05, 0.1),
+                 point_cloud_range=(0, -40, -3)):
         super().__init__()
-        # build whatever your “base” VFE is
+        # build underlying VFE
         self.base_vfe = MODELS.build(base_vfe_cfg)
+        self.embed_dims = embed_dims
+
+        # projector: base_vfe out_channels -> embed_dims
+        in_channels = getattr(self.base_vfe, 'out_channels',
+                              base_vfe_cfg.get('num_features'))
+        self.proj = nn.Linear(in_channels, embed_dims)
+
+        # simple MLP for positional encoding of (x,y,z)
+        self.pos_mlp = nn.Sequential(
+            nn.Linear(3, embed_dims),
+            nn.ReLU(inplace=True),
+            nn.Linear(embed_dims, embed_dims),
+        )
+
+        # store voxel geometry for center computation
+        self.register_buffer('voxel_size', torch.tensor(voxel_size).float())
+        self.register_buffer('pc_range', torch.tensor(point_cloud_range).float())
+
+        # logger
+        self.logger = logging.getLogger(__name__)
 
     def forward(self, features, num_points, coors):
         """
         Args:
-            features (Tensor[N, M, C_in]): raw per‑point features in each voxel
-            num_points (Tensor[N]): number of valid points per voxel
-            coors (Tensor[N, 4]): voxel coords (batch_idx, z, y, x)
-
+            features: Tensor[N, M, C_in]  — per‑point inputs
+            num_points: Tensor[N]          — points per voxel
+            coors: Tensor[N,4]             — (batch_idx, z, y, x)
         Returns:
-            Tuple:
-            - voxel_feats (Tensor[N, C_out]): output of base VFE
-            - coors (Tensor[N, 4]): *unchanged* coordinates
+            voxel_feats: Tensor[N, embed_dims]
+            coors: same as input
         """
-        voxel_feats = self.base_vfe(features, num_points, coors)
-        return voxel_feats, coors
+        # 1) base VFE
+        base_feats = self.base_vfe(features, num_points, coors)  # [N, C]
+        # 2) project
+        proj_feats = self.proj(base_feats)                       # [N, D]
+        # 3) compute real‑world centers: (z,y,x)*voxel_size + pc_range + voxel_size/2
+        centers = (coors[:, 1:].float() * self.voxel_size
+                   + self.pc_range.unsqueeze(0)
+                   + self.voxel_size.unsqueeze(0) * 0.5)       # [N,3]
+        pos_feats = self.pos_mlp(centers)                        # [N, D]
+        # 4) sum
+        out_feats = proj_feats + pos_feats                       # [N, D]
+
+        # ---- logging for insight ----
+        if self.training:
+            self.logger.info(
+                f"[AdaptiveVFE] base_feats ⎯ mean {base_feats.mean():.4f}, std {base_feats.std():.4f}"
+            )
+            self.logger.info(
+                f"[AdaptiveVFE] proj_feats ⎯ mean {proj_feats.mean():.4f}, std {proj_feats.std():.4f}"
+            )
+            self.logger.info(
+                f"[AdaptiveVFE] pos_feats ⎯ mean {pos_feats.mean():.4f}, std {pos_feats.std():.4f}"
+            )
+            self.logger.info(
+                f"[AdaptiveVFE] out_feats ⎯ mean {out_feats.mean():.4f}, std {out_feats.std():.4f}"
+            )
+            self.logger.info(f"[AdaptiveVFE] voxel count: {out_feats.shape[0]}")
+
+        return out_feats, coors

@@ -10,7 +10,6 @@ point_cloud_range = [0, -40, -3, 70.4, 40, 1]
 data_root = '/home/daham/mmdetection_project/dataset/KITTI/' 
 
 model = dict(
-    
     bbox_head=dict(
         num_classes=1,
         anchor_generator=dict(
