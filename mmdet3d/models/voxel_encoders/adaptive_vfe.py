@@ -268,6 +268,8 @@
 
 # mmdet3d/models/voxel_encoders/adaptive_vfe.py
 
+# mmdet3d/models/voxel_encoders/adaptive_vfe.py
+
 import logging
 import torch
 import torch.nn as nn
@@ -276,34 +278,44 @@ from mmdet3d.registry import MODELS
 @MODELS.register_module()
 class AdaptiveVFE(nn.Module):
     """
-    Step 1 VFE + position encoding, with back‑projection so downstream
-    SparseEncoder (in_channels) still matches.
+    VFE + positional MLP + local self‑attention (TransformerEncoder),
+    with back‑projection so downstream dims still match.
     """
     def __init__(self,
                  base_vfe_cfg=dict(type='HardSimpleVFE', num_features=4),
                  embed_dims=256,
+                 num_heads=8,
+                 num_layers=2,
                  voxel_size=(0.05, 0.05, 0.1),
                  point_cloud_range=(0, -40, -3)):
         super().__init__()
-        # 1) build base VFE
+        # 1) base VFE
         self.base_vfe = MODELS.build(base_vfe_cfg)
         in_ch = getattr(self.base_vfe, 'out_channels',
                         base_vfe_cfg.get('num_features'))
 
-        # 2) project to embed_dims
+        # 2) project -> embed_dims
         self.proj = nn.Linear(in_ch, embed_dims)
-
         # 3) positional MLP
         self.pos_mlp = nn.Sequential(
             nn.Linear(3, embed_dims),
             nn.ReLU(inplace=True),
             nn.Linear(embed_dims, embed_dims),
         )
+        # 4) Transformer stack for local self‑attention
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=embed_dims,
+            nhead=num_heads,
+            dim_feedforward=embed_dims*2,
+            dropout=0.1,
+            activation='relu')
+        self.transformer = nn.TransformerEncoder(
+            encoder_layer, num_layers=num_layers)
 
-        # 4) back‑project to original VFE channels
+        # 5) back‑project to original channels
         self.back_proj = nn.Linear(embed_dims, in_ch)
 
-        # register geometry buffers
+        # geometry buffers
         self.register_buffer('voxel_size', torch.tensor(voxel_size).float())
         self.register_buffer('pc_range', torch.tensor(point_cloud_range).float())
 
@@ -311,31 +323,36 @@ class AdaptiveVFE(nn.Module):
         self.logger = logging.getLogger(__name__)
 
     def forward(self, features, num_points, coors):
-        # base VFE: [N, in_ch]
-        base_feats = self.base_vfe(features, num_points, coors)
-        # embed: [N, D]
-        proj_feats = self.proj(base_feats)
+        # Base VFE
+        base_feats = self.base_vfe(features, num_points, coors)  # [N, in_ch]
 
-        # compute centers: (z,y,x)*vs + pcr + vs/2 => [N,3]
+        # Project + positional
+        proj_feats = self.proj(base_feats)                      # [N, D]
         centers = (coors[:, 1:].float() * self.voxel_size
                    + self.pc_range.unsqueeze(0)
-                   + self.voxel_size.unsqueeze(0) * 0.5)
-        pos_feats = self.pos_mlp(centers)  # [N, D]
+                   + self.voxel_size.unsqueeze(0) * 0.5)      # [N,3]
+        pos_feats = self.pos_mlp(centers)                       # [N, D]
+        fused = proj_feats + pos_feats                          # [N, D]
 
-        # sum embeddings
-        fused = proj_feats + pos_feats     # [N, D]
+        # Self-attention: treat all N voxels as a sequence
+        # Transformer expects shape (seq_len, batch, embed_dim), so:
+        seq = fused.unsqueeze(1)        # [N, 1, D]
+        attn_out = self.transformer(seq) # [N, 1, D]
+        attn_out = attn_out.squeeze(1)  # [N, D]
 
-        # back to in_ch so SparseEncoder still sees the same dim
-        out_feats = self.back_proj(fused)  # [N, in_ch]
+        # Back-project so SparseEncoder still sees the same in_ch
+        out_feats = self.back_proj(attn_out)                   # [N, in_ch]
 
-        # logs for insight
+        # Logging for insight
         if self.training:
             self.logger.info(
-                f"[AdaptiveVFE] base_feats ⎯ mean {base_feats.mean():.4f}, "
-                f"std {base_feats.std():.4f}")
+                f"[AdaptiveVFE] proj_feats  — mean {proj_feats.mean():.4f}, std {proj_feats.std():.4f}")
             self.logger.info(
-                f"[AdaptiveVFE] fused_feats ⎯ mean {fused.mean():.4f}, "
-                f"std {fused.std():.4f}")
+                f"[AdaptiveVFE] pos_feats   — mean {pos_feats.mean():.4f}, std {pos_feats.std():.4f}")
+            self.logger.info(
+                f"[AdaptiveVFE] fused_embedding — mean {fused.mean():.4f}, std {fused.std():.4f}")
+            self.logger.info(
+                f"[AdaptiveVFE] after_attn — mean {attn_out.mean():.4f}, std {attn_out.std():.4f}")
             self.logger.info(f"[AdaptiveVFE] voxel count: {out_feats.shape[0]}")
 
         return out_feats, coors
