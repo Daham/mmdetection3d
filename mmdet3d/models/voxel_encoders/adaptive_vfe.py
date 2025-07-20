@@ -1,8 +1,8 @@
-# import torch
-# import torch.nn as nn
-# import torch.nn.functional as F
-# import logging
-# from mmdet3d.registry import MODELS
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import logging
+from mmdet3d.registry import MODELS
 
 # logger = logging.getLogger(__name__)
 
