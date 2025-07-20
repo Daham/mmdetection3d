@@ -177,20 +177,20 @@ class AdaptiveVFE(nn.Module):
         base_feats = self.base_vfe(features, num_points, coors)  # [N, C_in]
         scores = base_feats.norm(p=2, dim=1)  # [N]
         N = scores.size(0)
-        logger.info(f"AdaptiveVFE: Input voxels = {N}")
+        print(f"AdaptiveVFE: Input voxels = {N}")
 
         # Early pruning
         K = max(int(N * self.keep_ratio), 1)
         _, keep_idx = torch.topk(scores, K, sorted=False)
         kept_feats = base_feats[keep_idx]      # [K, C_in]
         kept_coors = coors[keep_idx]           # [K, 4]
-        logger.info(f"AdaptiveVFE: After pruning, kept {K} voxels")
+        print(f"AdaptiveVFE: After pruning, kept {K} voxels")
 
         # Merging dropped voxels
         all_idx = torch.arange(N, device=scores.device)
         drop_mask = ~torch.isin(all_idx, keep_idx)
         dropped_feats = base_feats[drop_mask]   # [N-K, C_in]
-        logger.info(f"AdaptiveVFE: Merging {dropped_feats.size(0)} dropped voxels")
+        print(f"AdaptiveVFE: Merging {dropped_feats.size(0)} dropped voxels")
 
         if dropped_feats.numel() > 0:
             kept_norm = F.normalize(kept_feats, dim=1)
@@ -203,7 +203,7 @@ class AdaptiveVFE(nn.Module):
                 best = sims.argmax(dim=1)
                 for i, ki in enumerate(best):
                     kept_feats[ki] = (kept_feats[ki] + block[i]) * 0.5
-            logger.info(f"AdaptiveVFE: Merging completed")
+            print(f"AdaptiveVFE: Merging completed")
 
         # Splitting heavy voxels
         split_mask = num_points[keep_idx] > self.split_point_thresh
@@ -219,7 +219,7 @@ class AdaptiveVFE(nn.Module):
 
             kept_feats = torch.cat([kept_feats, split_feats], dim=0)
             kept_coors = torch.cat([kept_coors, new_coors], dim=0)
-            logger.info(f"AdaptiveVFE: Split {num_to_split} voxels, total now {kept_feats.size(0)}")
+            print(f"AdaptiveVFE: Split {num_to_split} voxels, total now {kept_feats.size(0)}")
 
         # Cap voxel count
         if kept_feats.size(0) > self.max_voxels:
@@ -227,7 +227,7 @@ class AdaptiveVFE(nn.Module):
             _, top_indices = torch.topk(scores, self.max_voxels, sorted=False)
             kept_feats = kept_feats[top_indices]
             kept_coors = kept_coors[top_indices]
-            logger.info(f"AdaptiveVFE: Capped voxels to {self.max_voxels}")
+            print(f"AdaptiveVFE: Capped voxels to {self.max_voxels}")
 
         # Fuse with positional encoding (no attention)
         proj_feats = self.proj(kept_feats)
@@ -240,6 +240,6 @@ class AdaptiveVFE(nn.Module):
         fused = proj_feats + pos_feats
 
         out_feats = self.fuse_mlp(fused)  # back to original feature size
-        logger.info(f"AdaptiveVFE: Output features shape {out_feats.shape}")
+        print(f"AdaptiveVFE: Output features shape {out_feats.shape}")
 
         return out_feats, kept_coors
