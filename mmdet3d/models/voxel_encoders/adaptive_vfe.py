@@ -130,10 +130,8 @@
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import logging
 from mmdet3d.registry import MODELS
-from torch_scatter import scatter_add
 
 logger = logging.getLogger(__name__)
 
@@ -143,7 +141,7 @@ class AdaptiveVFE(nn.Module):
         self,
         base_vfe_cfg=dict(type='HardSimpleVFE', num_features=4),
         embed_dims=128,
-        keep_ratio=1.0,  # keep all for now, since no pruning
+        keep_ratio=1.0,
         max_voxels=2048,
         voxel_size=(0.05, 0.05, 0.1),
         point_cloud_range=(0.0, -40.0, -3.0)
@@ -175,11 +173,29 @@ class AdaptiveVFE(nn.Module):
         N = base_feats.size(0)
         print(f"AdaptiveVFE: Input voxels = {N}")
 
-        # --- MERGE voxels with the same coordinate (differentiable) ---
+        # Merge voxels with same coordinates using scatter_reduce (PyTorch 2.0+)
         unique_coors, inverse_indices = torch.unique(coors, return_inverse=True, dim=0)
 
-        merged_feats = scatter_add(base_feats, inverse_indices, dim=0)
-        counts = scatter_add(torch.ones_like(inverse_indices, dtype=base_feats.dtype), inverse_indices, dim=0)
+        # sum features per unique coordinate
+        merged_feats = torch.zeros((unique_coors.size(0), base_feats.size(1)), device=base_feats.device)
+        merged_feats = merged_feats.scatter_reduce(
+            0,
+            inverse_indices.unsqueeze(-1).expand(-1, base_feats.size(1)),
+            base_feats,
+            reduce='sum',
+            include_self=False
+        )
+
+        # count voxels per unique coordinate
+        counts = torch.zeros((unique_coors.size(0),), device=base_feats.device)
+        counts = counts.scatter_reduce(
+            0,
+            inverse_indices,
+            torch.ones_like(inverse_indices, dtype=counts.dtype),
+            reduce='sum',
+            include_self=False
+        )
+
         merged_feats = merged_feats / counts.unsqueeze(1)
 
         kept_feats = merged_feats
