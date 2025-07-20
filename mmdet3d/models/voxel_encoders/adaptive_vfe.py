@@ -142,10 +142,9 @@ class AdaptiveVFE(nn.Module):
         self,
         base_vfe_cfg=dict(type='HardSimpleVFE', num_features=4),
         embed_dims=128,
-        keep_ratio=0.2,
+        keep_ratio=1.0,  # keep all for now, since no pruning
         max_voxels=2048,
         split_point_thresh=30,
-        merge_block_size=1024,
         voxel_size=(0.05, 0.05, 0.1),
         point_cloud_range=(0.0, -40.0, -3.0)
     ):
@@ -168,49 +167,25 @@ class AdaptiveVFE(nn.Module):
         self.keep_ratio = keep_ratio
         self.max_voxels = max_voxels
         self.split_point_thresh = split_point_thresh
-        self.merge_block_size = merge_block_size
 
         self.register_buffer('voxel_size', torch.tensor(voxel_size).float())
         self.register_buffer('pc_range', torch.tensor(point_cloud_range).float())
 
     def forward(self, features, num_points, coors):
         base_feats = self.base_vfe(features, num_points, coors)  # [N, C_in]
-        scores = base_feats.norm(p=2, dim=1)  # [N]
-        N = scores.size(0)
+        N = base_feats.size(0)
         print(f"AdaptiveVFE: Input voxels = {N}")
 
-        # Early pruning
-        K = max(int(N * self.keep_ratio), 1)
-        _, keep_idx = torch.topk(scores, K, sorted=False)
-        kept_feats = base_feats[keep_idx]      # [K, C_in]
-        kept_coors = coors[keep_idx]           # [K, 4]
-        print(f"AdaptiveVFE: After pruning, kept {K} voxels")
+        kept_feats = base_feats
+        kept_coors = coors
 
-        # Merging dropped voxels
-        all_idx = torch.arange(N, device=scores.device)
-        drop_mask = ~torch.isin(all_idx, keep_idx)
-        dropped_feats = base_feats[drop_mask]   # [N-K, C_in]
-        print(f"AdaptiveVFE: Merging {dropped_feats.size(0)} dropped voxels")
-
-        if dropped_feats.numel() > 0:
-            kept_norm = F.normalize(kept_feats, dim=1)
-            B = self.merge_block_size
-            for start in range(0, dropped_feats.size(0), B):
-                end = min(start + B, dropped_feats.size(0))
-                block = dropped_feats[start:end]
-                block_norm = F.normalize(block, dim=1)
-                sims = torch.matmul(block_norm, kept_norm.t())
-                best = sims.argmax(dim=1)
-                for i, ki in enumerate(best):
-                    kept_feats[ki] = (kept_feats[ki] + block[i]) * 0.5
-            print(f"AdaptiveVFE: Merging completed")
-
-        # Splitting heavy voxels
-        split_mask = num_points[keep_idx] > self.split_point_thresh
+        # Split voxels with too many points
+        split_mask = num_points > self.split_point_thresh
         num_to_split = split_mask.sum().item()
         if num_to_split > 0:
             to_split_feats = kept_feats[split_mask]
             to_split_coors = kept_coors[split_mask]
+
             split_offsets = torch.tensor([0, 0, 0, 1], device=to_split_coors.device).unsqueeze(0)
             new_coors = to_split_coors + split_offsets
 
@@ -219,7 +194,7 @@ class AdaptiveVFE(nn.Module):
 
             kept_feats = torch.cat([kept_feats, split_feats], dim=0)
             kept_coors = torch.cat([kept_coors, new_coors], dim=0)
-            print(f"AdaptiveVFE: Split {num_to_split} voxels, total now {kept_feats.size(0)}")
+            logger.info(f"AdaptiveVFE: Split {num_to_split} voxels, total now {kept_feats.size(0)}")
 
         # Cap voxel count
         if kept_feats.size(0) > self.max_voxels:
@@ -229,7 +204,7 @@ class AdaptiveVFE(nn.Module):
             kept_coors = kept_coors[top_indices]
             print(f"AdaptiveVFE: Capped voxels to {self.max_voxels}")
 
-        # Fuse with positional encoding (no attention)
+        # Add position info
         proj_feats = self.proj(kept_feats)
         centers = (
             kept_coors[:, 1:].float() * self.voxel_size
@@ -239,7 +214,8 @@ class AdaptiveVFE(nn.Module):
         pos_feats = self.pos_mlp(centers)
         fused = proj_feats + pos_feats
 
-        out_feats = self.fuse_mlp(fused)  # back to original feature size
+        out_feats = self.fuse_mlp(fused)
         print(f"AdaptiveVFE: Output features shape {out_feats.shape}")
 
         return out_feats, kept_coors
+
