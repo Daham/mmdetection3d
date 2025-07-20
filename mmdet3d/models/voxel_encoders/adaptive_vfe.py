@@ -128,20 +128,13 @@
 #         return out_feats, kept_coors
 
 
-import torch
-import torch.nn as nn
-import logging
-from mmdet3d.registry import MODELS
-
-logger = logging.getLogger(__name__)
-
 @MODELS.register_module()
 class AdaptiveVFE(nn.Module):
     def __init__(
         self,
         base_vfe_cfg=dict(type='HardSimpleVFE', num_features=4),
         embed_dims=128,
-        keep_ratio=1.0,
+        keep_ratio=1.0,  # keep all for now, since no pruning
         max_voxels=2048,
         voxel_size=(0.05, 0.05, 0.1),
         point_cloud_range=(0.0, -40.0, -3.0)
@@ -169,39 +162,13 @@ class AdaptiveVFE(nn.Module):
         self.register_buffer('pc_range', torch.tensor(point_cloud_range).float())
 
     def forward(self, features, num_points, coors):
-        base_feats = self.base_vfe(features, num_points, coors)  # [N, C_in]
-        N = base_feats.size(0)
-        print(f"AdaptiveVFE: Input voxels = {N}")
+        base_feats = self.base_vfe(features, num_points, coors)
+        print(f"AdaptiveVFE: Input voxels = {base_feats.size(0)}")
 
-        # Merge voxels with same coordinates using scatter_reduce (PyTorch 2.0+)
-        unique_coors, inverse_indices = torch.unique(coors, return_inverse=True, dim=0)
+        # No merge, just cap voxel count
+        kept_feats = base_feats
+        kept_coors = coors
 
-        # sum features per unique coordinate
-        merged_feats = torch.zeros((unique_coors.size(0), base_feats.size(1)), device=base_feats.device)
-        merged_feats = merged_feats.scatter_reduce(
-            0,
-            inverse_indices.unsqueeze(-1).expand(-1, base_feats.size(1)),
-            base_feats,
-            reduce='sum',
-            include_self=False
-        )
-
-        # count voxels per unique coordinate
-        counts = torch.zeros((unique_coors.size(0),), device=base_feats.device)
-        counts = counts.scatter_reduce(
-            0,
-            inverse_indices,
-            torch.ones_like(inverse_indices, dtype=counts.dtype),
-            reduce='sum',
-            include_self=False
-        )
-
-        merged_feats = merged_feats / counts.unsqueeze(1)
-
-        kept_feats = merged_feats
-        kept_coors = unique_coors
-
-        # Cap voxel count if needed
         if kept_feats.size(0) > self.max_voxels:
             scores = kept_feats.norm(dim=1)
             _, top_indices = torch.topk(scores, self.max_voxels, sorted=False)
@@ -209,7 +176,7 @@ class AdaptiveVFE(nn.Module):
             kept_coors = kept_coors[top_indices]
             print(f"AdaptiveVFE: Capped voxels to {self.max_voxels}")
 
-        # Add position info
+        # Position embedding + fusion
         proj_feats = self.proj(kept_feats)
         centers = (
             kept_coors[:, 1:].float() * self.voxel_size
@@ -223,3 +190,4 @@ class AdaptiveVFE(nn.Module):
         print(f"AdaptiveVFE: Output features shape {out_feats.shape}")
 
         return out_feats, kept_coors
+
