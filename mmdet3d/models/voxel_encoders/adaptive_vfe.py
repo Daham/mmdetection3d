@@ -159,20 +159,20 @@ class AdaptiveVFE(nn.Module):
         base_feats = self.base_vfe(features, num_points, coors)  # [N, C_in]
         scores = base_feats.norm(p=2, dim=1)  # [N]
         N = scores.size(0)
-        logger.info(f"AdaptiveVFE: Input voxels = {N}")
+        print(f"AdaptiveVFE: Input voxels = {N}")
 
         # Early pruning by keep_ratio
         K = max(int(N * self.keep_ratio), 1)
         _, keep_idx = torch.topk(scores, K, sorted=False)
         kept_feats = base_feats[keep_idx]      # [K, C_in]
         kept_coors = coors[keep_idx]           # [K, 4]
-        logger.info(f"AdaptiveVFE: After pruning, kept {K} voxels")
+        print(f"AdaptiveVFE: After pruning, kept {K} voxels")
 
         # Dropped voxels for merging
         all_idx = torch.arange(N, device=scores.device)
         drop_mask = ~torch.isin(all_idx, keep_idx)
         dropped_feats = base_feats[drop_mask]   # [N-K, C_in]
-        logger.info(f"AdaptiveVFE: Merging {dropped_feats.size(0)} dropped voxels")
+        print(f"AdaptiveVFE: Merging {dropped_feats.size(0)} dropped voxels")
 
         # Merge dropped voxels into kept voxels (blockwise)
         if dropped_feats.numel() > 0:
@@ -203,7 +203,7 @@ class AdaptiveVFE(nn.Module):
 
             kept_feats = torch.cat([kept_feats, split_feats], dim=0)
             kept_coors = torch.cat([kept_coors, new_coors], dim=0)
-            logger.info(f"AdaptiveVFE: Split {num_to_split} voxels, new total {kept_feats.size(0)}")
+            print(f"AdaptiveVFE: Split {num_to_split} voxels, new total {kept_feats.size(0)}")
 
         # Cap number of voxels before transformer attention
         if kept_feats.size(0) > self.max_voxels:
@@ -211,7 +211,7 @@ class AdaptiveVFE(nn.Module):
             _, top_indices = torch.topk(scores, self.max_voxels, sorted=False)
             kept_feats = kept_feats[top_indices]
             kept_coors = kept_coors[top_indices]
-            logger.info(f"AdaptiveVFE: Capped voxels to max {self.max_voxels} before Transformer")
+            print(f"AdaptiveVFE: Capped voxels to max {self.max_voxels} before Transformer")
 
         # Project to embed dim
         proj_feats = self.proj(kept_feats)  # [K, D]
@@ -227,7 +227,7 @@ class AdaptiveVFE(nn.Module):
 
         # Transformer self-attention
         attn_out = self.transformer(fused.unsqueeze(0)).squeeze(0)  # [K, D]
-        logger.info(f"AdaptiveVFE: Transformer output shape {attn_out.shape}")
+        print(f"AdaptiveVFE: Transformer output shape {attn_out.shape}")
 
         # Back-project to original channels
         out_feats = self.back_proj(attn_out)  # [K, C_in]
