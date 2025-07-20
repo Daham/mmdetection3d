@@ -128,6 +128,12 @@
 #         return out_feats, kept_coors
 
 
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import logging
+from mmdet3d.registry import MODELS
+
 @MODELS.register_module()
 class AdaptiveVFE(nn.Module):
     def __init__(
