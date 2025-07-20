@@ -1,8 +1,8 @@
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import logging
-from mmdet3d.registry import MODELS
+# import torch
+# import torch.nn as nn
+# import torch.nn.functional as F
+# import logging
+# from mmdet3d.registry import MODELS
 
 # logger = logging.getLogger(__name__)
 
@@ -128,6 +128,15 @@ from mmdet3d.registry import MODELS
 #         return out_feats, kept_coors
 
 
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import logging
+from mmdet3d.registry import MODELS
+from torch_scatter import scatter_add
+
+logger = logging.getLogger(__name__)
+
 @MODELS.register_module()
 class AdaptiveVFE(nn.Module):
     def __init__(
@@ -166,18 +175,11 @@ class AdaptiveVFE(nn.Module):
         N = base_feats.size(0)
         print(f"AdaptiveVFE: Input voxels = {N}")
 
-        # --- MERGE voxels with the same coordinate ---
-        # coors shape: [N, 4] (batch_idx, x, y, z)
-        # Find unique voxel coordinates and merge features by averaging
-
+        # --- MERGE voxels with the same coordinate (differentiable) ---
         unique_coors, inverse_indices = torch.unique(coors, return_inverse=True, dim=0)
 
-        merged_feats = torch.zeros((unique_coors.size(0), base_feats.size(1)), device=base_feats.device)
-        counts = torch.zeros((unique_coors.size(0),), device=base_feats.device)
-
-        merged_feats.index_add_(0, inverse_indices, base_feats)
-        counts.index_add_(0, inverse_indices, torch.ones_like(inverse_indices, dtype=base_feats.dtype))
-
+        merged_feats = scatter_add(base_feats, inverse_indices, dim=0)
+        counts = scatter_add(torch.ones_like(inverse_indices, dtype=base_feats.dtype), inverse_indices, dim=0)
         merged_feats = merged_feats / counts.unsqueeze(1)
 
         kept_feats = merged_feats
