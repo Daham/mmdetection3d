@@ -130,9 +130,10 @@
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import logging
 from mmdet3d.registry import MODELS
+
+logger = logging.getLogger(__name__)
 
 @MODELS.register_module()
 class AdaptiveVFE(nn.Module):
@@ -140,8 +141,6 @@ class AdaptiveVFE(nn.Module):
         self,
         base_vfe_cfg=dict(type='HardSimpleVFE', num_features=4),
         embed_dims=128,
-        keep_ratio=1.0,  # keep all for now, since no pruning
-        max_voxels=2048,
         voxel_size=(0.05, 0.05, 0.1),
         point_cloud_range=(0.0, -40.0, -3.0)
     ):
@@ -161,28 +160,30 @@ class AdaptiveVFE(nn.Module):
             nn.Linear(embed_dims, self.in_ch)
         )
 
-        self.keep_ratio = keep_ratio
-        self.max_voxels = max_voxels
+        # gating MLP for voxel-wise adaptive weighting
+        self.gate_mlp = nn.Sequential(
+            nn.Linear(self.in_ch, self.in_ch // 2),
+            nn.ReLU(inplace=True),
+            nn.Linear(self.in_ch // 2, 1),
+            nn.Sigmoid()
+        )
 
         self.register_buffer('voxel_size', torch.tensor(voxel_size).float())
         self.register_buffer('pc_range', torch.tensor(point_cloud_range).float())
 
     def forward(self, features, num_points, coors):
-        base_feats = self.base_vfe(features, num_points, coors)
-        print(f"AdaptiveVFE: Input voxels = {base_feats.size(0)}")
+        base_feats = self.base_vfe(features, num_points, coors)  # [N, C_in]
+        N = base_feats.size(0)
+        print(f"AdaptiveVFE: Input voxels = {N}")
 
-        # No merge, just cap voxel count
-        kept_feats = base_feats
+        gate_weights = self.gate_mlp(base_feats)  # [N,1] in (0,1)
+        gated_feats = base_feats * gate_weights
+
+        # No voxel capping now, use all voxels as-is
+        kept_feats = gated_feats
         kept_coors = coors
 
-        if kept_feats.size(0) > self.max_voxels:
-            scores = kept_feats.norm(dim=1)
-            _, top_indices = torch.topk(scores, self.max_voxels, sorted=False)
-            kept_feats = kept_feats[top_indices]
-            kept_coors = kept_coors[top_indices]
-            print(f"AdaptiveVFE: Capped voxels to {self.max_voxels}")
-
-        # Position embedding + fusion
+        # Positional encoding
         proj_feats = self.proj(kept_feats)
         centers = (
             kept_coors[:, 1:].float() * self.voxel_size
@@ -196,4 +197,3 @@ class AdaptiveVFE(nn.Module):
         print(f"AdaptiveVFE: Output features shape {out_feats.shape}")
 
         return out_feats, kept_coors
-
