@@ -128,14 +128,6 @@
 #         return out_feats, kept_coors
 
 
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import logging
-from mmdet3d.registry import MODELS
-
-logger = logging.getLogger(__name__)
-
 @MODELS.register_module()
 class AdaptiveVFE(nn.Module):
     def __init__(
@@ -144,7 +136,6 @@ class AdaptiveVFE(nn.Module):
         embed_dims=128,
         keep_ratio=1.0,  # keep all for now, since no pruning
         max_voxels=2048,
-        split_point_thresh=30,
         voxel_size=(0.05, 0.05, 0.1),
         point_cloud_range=(0.0, -40.0, -3.0)
     ):
@@ -166,7 +157,6 @@ class AdaptiveVFE(nn.Module):
 
         self.keep_ratio = keep_ratio
         self.max_voxels = max_voxels
-        self.split_point_thresh = split_point_thresh
 
         self.register_buffer('voxel_size', torch.tensor(voxel_size).float())
         self.register_buffer('pc_range', torch.tensor(point_cloud_range).float())
@@ -176,27 +166,24 @@ class AdaptiveVFE(nn.Module):
         N = base_feats.size(0)
         print(f"AdaptiveVFE: Input voxels = {N}")
 
-        kept_feats = base_feats
-        kept_coors = coors
+        # --- MERGE voxels with the same coordinate ---
+        # coors shape: [N, 4] (batch_idx, x, y, z)
+        # Find unique voxel coordinates and merge features by averaging
 
-        # Split voxels with too many points
-        split_mask = num_points > self.split_point_thresh
-        num_to_split = split_mask.sum().item()
-        if num_to_split > 0:
-            to_split_feats = kept_feats[split_mask]
-            to_split_coors = kept_coors[split_mask]
+        unique_coors, inverse_indices = torch.unique(coors, return_inverse=True, dim=0)
 
-            split_offsets = torch.tensor([0, 0, 0, 1], device=to_split_coors.device).unsqueeze(0)
-            new_coors = to_split_coors + split_offsets
+        merged_feats = torch.zeros((unique_coors.size(0), base_feats.size(1)), device=base_feats.device)
+        counts = torch.zeros((unique_coors.size(0),), device=base_feats.device)
 
-            kept_feats[split_mask] = to_split_feats * 0.5
-            split_feats = to_split_feats * 0.5
+        merged_feats.index_add_(0, inverse_indices, base_feats)
+        counts.index_add_(0, inverse_indices, torch.ones_like(inverse_indices, dtype=base_feats.dtype))
 
-            kept_feats = torch.cat([kept_feats, split_feats], dim=0)
-            kept_coors = torch.cat([kept_coors, new_coors], dim=0)
-            logger.info(f"AdaptiveVFE: Split {num_to_split} voxels, total now {kept_feats.size(0)}")
+        merged_feats = merged_feats / counts.unsqueeze(1)
 
-        # Cap voxel count
+        kept_feats = merged_feats
+        kept_coors = unique_coors
+
+        # Cap voxel count if needed
         if kept_feats.size(0) > self.max_voxels:
             scores = kept_feats.norm(dim=1)
             _, top_indices = torch.topk(scores, self.max_voxels, sorted=False)
@@ -218,4 +205,3 @@ class AdaptiveVFE(nn.Module):
         print(f"AdaptiveVFE: Output features shape {out_feats.shape}")
 
         return out_feats, kept_coors
-
