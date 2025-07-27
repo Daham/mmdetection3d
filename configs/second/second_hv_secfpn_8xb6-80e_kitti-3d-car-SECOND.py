@@ -2,7 +2,7 @@ _base_ = './second_hv_secfpn_8xb6-80e_kitti-3d-car-SECOND.py'
 
 # Only override the voxel encoder to use LearnableVFE
 model = dict(
-    voxel_encoder=dict(
+    pts_voxel_encoder=dict(
         type='LearnableVFE',
         in_channels=4,
         feat_channels=[64],
