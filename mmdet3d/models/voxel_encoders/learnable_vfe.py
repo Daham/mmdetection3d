@@ -1,57 +1,77 @@
-# File: mmdet3d/models/voxel_encoders/learnable_vfe.py
+# mmdet3d/models/voxel_encoders/learnable_vfe.py
 
 import torch
 import torch.nn as nn
-from mmdet3d.models import VOXEL_ENCODERS
-from mmdet3d.models.voxel_encoders.pillar_vfe import PillarVFE
+from mmdet3d.registry import MODELS
 
-@VOXEL_ENCODERS.register_module()
-class LearnableVFE(PillarVFE):
-    """
-    VFE that learns its 3D support size per channel.
-    Inherits from PillarVFE (or HardVFE) and simply
-    replaces the fixed voxel_size with a learnable parameter.
-    """
-
+@MODELS.register_module()
+class LearnableVFE(nn.Module):
+    """Learnable Voxel Feature Encoder, replacing original PillarVFE."""
     def __init__(self,
                  in_channels,
                  feat_channels,
-                 support_size=(3.0, 0.2, 0.2),
                  with_distance=False,
-                 voxel_size=None,
-                 point_cloud_range=None,
-                 **kwargs):
-        # we ignore voxel_size and point_cloud_range here:
-        super().__init__(
-            in_channels=in_channels,
-            feat_channels=feat_channels,
-            voxel_size=voxel_size,
-            point_cloud_range=point_cloud_range,
-            with_distance=with_distance,
-            **kwargs)
-        # override: make support_size a learnable parameter
-        self.support_size = nn.Parameter(
-            torch.tensor(support_size, dtype=torch.float),
-            requires_grad=True)
+                 voxel_size=(0.5, 0.5, 0.5),
+                 point_cloud_range=(0, -40, -3, 70.4, 40, 1)):
+        super().__init__()
+        self.with_distance = with_distance
+        # number of input features per point (xyz + intensity)
+        in_dim = in_channels
+        if with_distance:
+            in_dim += 1
+        # learnable scaling factor for voxel size
+        self.scale = nn.Parameter(
+            torch.tensor(1.0, dtype=torch.float), requires_grad=True)
+        # project per-point features → hidden feat
+        layers = []
+        last_channels = in_dim
+        for out_ch in feat_channels:
+            layers.append(nn.Linear(last_channels, out_ch, bias=False))
+            layers.append(nn.BatchNorm1d(out_ch))
+            layers.append(nn.ReLU(inplace=True))
+            last_channels = out_ch
+        self.point_fc = nn.Sequential(*layers)
+        # final linear to get voxel-level feature
+        self.voxel_fc = nn.Linear(last_channels, feat_channels[-1], bias=False)
 
-    def forward(self, features, num_points, coors, batch_size):
-        # features: (num_voxels, max_points, C)
-        # num_points: (num_voxels,)
-        # coors: (num_voxels, 4)
-        # batch_size: int
+        # save default sizes
+        self.register_buffer('voxel_size', torch.tensor(voxel_size))
+        self.register_buffer('pc_range', torch.tensor(point_cloud_range))
 
-        # Here you would *use* self.support_size wherever
-        # the base PillarVFE uses self.voxel_size in its create
-        # of the pillar features. E.g. you might normalize
-        # the x,y,z offsets by dividing by support_size.
-        # For simplicity, we pass through to PillarVFE but you
-        # can extend its `_get_pillar_features` to read
-        # self.support_size instead of self.voxel_size:
+    def forward(self, features, num_points, coors):
+        """
+        Args:
+            features (torch.Tensor): (sum(V), P, C) per-point features
+            num_points (torch.Tensor): (sum(V),) number of points per voxel
+            coors (torch.Tensor):  (sum(V), 4) voxel indices (batch, z,y,x)
+        Returns:
+            voxel_features (torch.Tensor): (sum(V), out_channels)
+        """
+        # 1. Compute centroid of each voxel
+        points_mean = (features.sum(dim=1) /
+                       num_points.type_as(features).view(-1, 1))
+        # 2. Expand to per-point
+        f_centroid = points_mean[coors[:, 0], :]  # batch gathering
+        f_centroid = f_centroid.unsqueeze(1).repeat(1, features.size(1), 1)
+        # 3. Local deviation
+        f_dev = features - f_centroid
+        # 4. Optionally add distance to center
+        if self.with_distance:
+            # compute point coords from coors, scaled by learnable factor
+            voxel_size = self.voxel_size * torch.exp(self.scale)
+            pc_range = self.pc_range.view(2, 3)
+            coords = coors[:, 1:].float()
+            points_xyz = coords * voxel_size + voxel_size / 2 + pc_range[0]
+            center = coords * voxel_size + voxel_size / 2 + pc_range[0]
+            dist = torch.norm(points_xyz - center, dim=1, keepdim=True)
+            dist = dist.unsqueeze(1).repeat(1, features.size(1), 1)
+            features = torch.cat([features, dist], dim=-1)
 
-        # --- Example hook (pseudo) ---
-        # self.voxel_size = self.support_size
-        # self.point_cloud_range = [
-        #   -s/2 for s in support_size] + [
-        #    s/2 for s in support_size]
-
-        return super().forward(features, num_points, coors, batch_size)
+        # 5. Per-point MLP
+        pts_feats = self.point_fc(features.view(-1, features.size(-1)))
+        pts_feats = pts_feats.view(features.size(0), -1, pts_feats.size(-1))
+        # 6. Aggregate by max pooling
+        voxel_feats, _ = torch.max(pts_feats, dim=1)
+        # 7. Final linear
+        voxel_feats = self.voxel_fc(voxel_feats)
+        return voxel_feats
