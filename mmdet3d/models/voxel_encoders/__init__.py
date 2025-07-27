@@ -4,6 +4,7 @@ from .voxel_encoder import (DynamicSimpleVFE, DynamicVFE, HardSimpleVFE,
                             HardVFE, SegVFE)
 
 from .adaptive_vfe import AdaptiveVFE  
+from .learnable_vfe import LearnableVFE  
 
 __all__ = [
     'PillarFeatureNet', 'DynamicPillarFeatureNet', 'HardVFE', 'DynamicVFE',

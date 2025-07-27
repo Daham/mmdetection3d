@@ -11,6 +11,7 @@ from .nostem_regnet import NoStemRegNet
 from .pointnet2_sa_msg import PointNet2SAMSG
 from .pointnet2_sa_ssg import PointNet2SASSG
 from .second import SECOND
+from .adaptive_voxel_second import AdaptiveVoxelSECOND
 from .spvcnn_backone import MinkUNetBackboneV2, SPVCNNBackbone
 
 __all__ = [
