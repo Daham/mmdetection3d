@@ -7,5 +7,5 @@ from .adaptive_vfe import AdaptiveVFE
 
 __all__ = [
     'PillarFeatureNet', 'DynamicPillarFeatureNet', 'HardVFE', 'DynamicVFE',
-    'HardSimpleVFE', 'DynamicSimpleVFE', 'SegVFE', 'AdaptiveVFE'
+    'HardSimpleVFE', 'DynamicSimpleVFE', 'SegVFE', 'AdaptiveVFE', 'LearnableVFE'
 ]

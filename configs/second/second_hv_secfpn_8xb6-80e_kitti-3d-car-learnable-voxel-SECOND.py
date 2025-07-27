@@ -5,14 +5,6 @@ _base_ = [
     '../_base_/default_runtime.py'
 ]
 
-# Add custom imports for our adaptive modules
-custom_imports = dict(
-    imports=[
-        'mmdet3d.models.backbones.adaptive_voxel_second',
-        'mmdet3d.models.voxel_encoders.learnable_vfe'
-    ],
-    allow_failed_imports=False)
-
 # Keep the same parameters from your original config
 voxel_size = [0.5, 0.5, 0.5]
 point_cloud_range = [0, -40, -3, 70.4, 40, 1]
@@ -55,6 +47,3 @@ model = dict(
 optim_wrapper = dict(
     optimizer=dict(type='AdamW', lr=0.0002, weight_decay=0.01)
 )
-
-# Override the data root to your path
-data_root = '/home/daham/mmdetection_project/dataset/KITTI/'
