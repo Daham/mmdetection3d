@@ -1,15 +1,33 @@
 _base_ = [
     '../_base_/models/second_hv_secfpn_kitti.py',
-    '../_base_/datasets/kitti-3d-car.py', '../_base_/schedules/cyclic-2e.py',
+    '../_base_/datasets/kitti-3d-car.py',
+    '../_base_/schedules/cyclic-2e.py',
     '../_base_/default_runtime.py'
 ]
 
+# Add custom imports for our adaptive modules
+custom_imports = dict(
+    imports=[
+        'mmdet3d.models.backbones.adaptive_voxel_second',
+        'mmdet3d.models.voxel_encoders.learnable_vfe'
+    ],
+    allow_failed_imports=False)
 
+# Keep the same parameters from your original config
 voxel_size = [0.5, 0.5, 0.5]
 point_cloud_range = [0, -40, -3, 70.4, 40, 1]
-data_root = '/home/daham/mmdetection_project/dataset/KITTI/' 
+data_root = '/home/daham/mmdetection_project/dataset/KITTI/'
 
+# Only override what we need to change - use AdaptiveVoxelSECOND instead of VoxelNet
 model = dict(
+    type='AdaptiveVoxelSECOND',  # This is the main change
+    reader=dict(
+        type='VoxelFeatureExtractorV3',
+        num_input_features=4,
+        norm_cfg=dict(type='BN1d', eps=1e-3, momentum=0.01),
+        voxel_size=voxel_size,
+        point_cloud_range=point_cloud_range,
+    ),
     bbox_head=dict(
         num_classes=1,
         anchor_generator=dict(
@@ -21,7 +39,7 @@ model = dict(
             reshape_out=True)),
     train_cfg=dict(
         _delete_=True,
-        max_epochs=5,
+        max_epochs=5,  # Keep your original training epochs
         assigner=dict(
             type='Max3DIoUAssigner',
             iou_calculator=dict(type='BboxOverlapsNearest3D'),
@@ -33,6 +51,10 @@ model = dict(
         pos_weight=-1,
         debug=False))
 
+# Keep your optimizer settings
 optim_wrapper = dict(
     optimizer=dict(type='AdamW', lr=0.0002, weight_decay=0.01)
 )
+
+# Override the data root to your path
+data_root = '/home/daham/mmdetection_project/dataset/KITTI/'
