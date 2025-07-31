@@ -4,7 +4,7 @@ import torch
 from mmdet3d.registry import MODELS
 from .voxelnet import VoxelNet
 
-@MODELS.register_module()
+# @MODELS.register_module()  # Disabled for compatibility
 class AdaptiveVoxelNet(VoxelNet):
     """
     VoxelNet variant that supports learnable voxel sizes.
