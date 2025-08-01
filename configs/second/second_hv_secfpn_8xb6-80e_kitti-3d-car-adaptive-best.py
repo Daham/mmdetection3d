@@ -15,39 +15,58 @@ _base_ = [
     '../_base_/default_runtime.py'
 ]
 
-voxel_size = [0.05, 0.05, 0.1]
+voxel_size = [0.5, 0.5, 0.5]  # MATCH vanilla SECOND
 point_cloud_range = [0, -40, -3, 70.4, 40, 1]
 data_root = '/home/daham/mmdetection_project/dataset/KITTI/'
 
 model = dict(
-    # Replace voxel encoder with adaptive version
+    # UPDATE: Match voxel_size with vanilla
+    data_preprocessor=dict(
+        voxel_layer=dict(
+            voxel_size=voxel_size,
+            point_cloud_range=point_cloud_range)),
+    
+    # Adaptive voxel encoder - but match vanilla output channels
     voxel_encoder=dict(
         type='AdaptiveVFE',
-        in_channels=4,
-        feat_channels=[64],
-        with_distance=False,
-        voxel_size=voxel_size,
-        point_cloud_range=point_cloud_range,
-        base_sparse_shape=[41, 1600, 1408],
-        adaptation_method='density',
-        num_scales=3),
+        base_vfe_cfg=dict(
+            type='HardSimpleVFE',
+            num_features=4  # Output 4 channels like vanilla
+        )),
     
-    # Replace middle encoder with adaptive version
+    # Adaptive middle encoder with corrected sparse_shape for voxel_size [0.5, 0.5, 0.5]
     middle_encoder=dict(
         type='AdaptiveSparseEncoderV3Simple',
-        in_channels=64,
-        sparse_shape=[41, 1600, 1408],
-        order=('conv', 'norm', 'act'),
-        norm_cfg=dict(type='BN1d', eps=1e-3, momentum=0.01),
-        base_channels=16,
-        output_channels=128,
-        encoder_channels=((16, ), (32, 32, 32), (64, 64, 64), (64, 64, 64)),
-        encoder_paddings=((1, ), (1, 1, 1), (1, 1, 1), ((0, 1, 1), 1, 1)),
-        adaptive_channel_boost=64))
+        in_channels=4,  # Match vanilla input channels
+        sparse_shape=[8, 160, 141],  # Correct for voxel_size [0.5, 0.5, 0.5]
+        order=('conv', 'norm', 'act')),
+    
+    # Match vanilla bbox configuration exactly
+    bbox_head=dict(
+        num_classes=1,
+        anchor_generator=dict(
+            _delete_=True,
+            type='Anchor3DRangeGenerator',
+            ranges=[[0, -40.0, -3.0, 70.4, 40.0, 1.0]],
+            sizes=[[3.9, 1.6, 1.56]],
+            rotations=[0, 1.57],
+            reshape_out=True)),
+    train_cfg=dict(
+        _delete_=True,
+        assigner=dict(
+            type='Max3DIoUAssigner',
+            iou_calculator=dict(type='BboxOverlapsNearest3D'),
+            pos_iou_thr=0.6,
+            neg_iou_thr=0.45,
+            min_pos_iou=0.45,
+            ignore_iof_thr=-1),
+        allowed_border=0,
+        pos_weight=-1,
+        debug=False))
 
-# Override training epochs to 2
+# Override training epochs to match vanilla
 train_cfg = dict(max_epochs=2, val_interval=1)
 
-# Optimizer with adaptive-friendly settings
+# MATCH vanilla optimizer exactly
 optim_wrapper = dict(
-    optimizer=dict(type='AdamW', lr=0.003, weight_decay=0.01))
+    optimizer=dict(type='AdamW', lr=0.0002, weight_decay=0.01))
