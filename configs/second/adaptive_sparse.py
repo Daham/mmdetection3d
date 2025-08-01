@@ -8,10 +8,7 @@ _base_ = [
     '../_base_/default_runtime.py'
 ]
 
-# Import the adaptive voxelization bridge
-custom_imports = dict(
-    imports=['mmdet3d.models.voxel_encoders.adaptive_sparse_bridge'],
-    allow_failed_imports=False)
+# No custom imports needed - module is registered automatically
 
 # This bridge:
 # 1. Learns adaptive voxel sizes during training
