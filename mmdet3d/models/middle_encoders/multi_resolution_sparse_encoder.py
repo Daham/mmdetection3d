@@ -3,10 +3,24 @@
 
 import torch
 import torch.nn as nn
-from spconv.pytorch import SparseConvTensor, SparseConv3d, SubMConv3d
 from typing import Dict, List, Tuple, Optional
 from mmdet3d.registry import MODELS
-from .sparse_encoder import SparseEncoder
+
+try:
+    from spconv.pytorch import SparseConvTensor, SparseConv3d, SubMConv3d
+    from .sparse_encoder import SparseEncoder
+    SPCONV_AVAILABLE = True
+except ImportError:
+    SPCONV_AVAILABLE = False
+    # Create dummy classes to prevent import errors
+    class SparseConvTensor:
+        pass
+    class SparseConv3d:
+        pass
+    class SubMConv3d:
+        pass
+    class SparseEncoder:
+        pass
 
 
 @MODELS.register_module()
@@ -16,6 +30,8 @@ class MultiResolutionSparseEncoder(nn.Module):
     
     This allows true adaptive voxelization by processing different regions at 
     different resolutions and fusing the results.
+    
+    Note: Requires spconv to be installed.
     """
     
     def __init__(self, 
@@ -27,6 +43,13 @@ class MultiResolutionSparseEncoder(nn.Module):
                  assignment_threshold: float = 0.1,
                  fusion_method: str = 'weighted_concat'):  # 'weighted_concat', 'attention', 'simple'
         super().__init__()
+        
+        # Check if spconv is available
+        if not SPCONV_AVAILABLE:
+            raise ImportError(
+                "spconv is required for MultiResolutionSparseEncoder. "
+                "Please install spconv: pip install spconv-cu118"
+            )
         
         self.base_voxel_size = base_voxel_size
         self.point_cloud_range = point_cloud_range
