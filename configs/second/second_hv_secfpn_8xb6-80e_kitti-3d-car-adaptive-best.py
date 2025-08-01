@@ -2,9 +2,11 @@
 # OPTIMAL CONFIG FOR ADAPTIVE VOXELIZATION
 # Using AdaptiveSparseEncoderV3Simple as the best balance of performance and adaptivity
 
-# Import custom modules to ensure registration
-from mmdet3d.models.voxel_encoders.adaptive_vfe import AdaptiveVFE
-from mmdet3d.models.middle_encoders.adaptive_sparse_encoder_v3 import AdaptiveSparseEncoderV3Simple
+# Custom imports to ensure adaptive modules are loaded
+custom_imports = dict(
+    imports=['mmdet3d.models.voxel_encoders.adaptive_vfe',
+             'mmdet3d.models.middle_encoders.adaptive_sparse_encoder_v3'],
+    allow_failed_imports=False)
 
 _base_ = [
     '../_base_/datasets/kitti-3d-3class.py',
