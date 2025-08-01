@@ -26,18 +26,22 @@ model = dict(
             voxel_size=voxel_size,
             point_cloud_range=point_cloud_range)),
     
-    # Adaptive voxel encoder - but match vanilla output channels
+    # Adaptive voxel encoder - use YOUR implementation's parameters
     voxel_encoder=dict(
         type='AdaptiveVFE',
-        base_vfe_cfg=dict(
-            type='HardSimpleVFE',
-            num_features=4  # Output 4 channels like vanilla
-        )),
+        in_channels=4,
+        feat_channels=[64],  # Output 64 channels
+        with_distance=False,
+        voxel_size=(0.5, 0.5, 0.5),
+        point_cloud_range=(0, -40, -3, 70.4, 40, 1),
+        base_sparse_shape=[8, 160, 141],  # Correct for voxel_size [0.5, 0.5, 0.5]
+        adaptation_method='density',
+        num_scales=3),
     
-    # Adaptive middle encoder with corrected sparse_shape for voxel_size [0.5, 0.5, 0.5]
+    # Adaptive middle encoder - update in_channels to match AdaptiveVFE output
     middle_encoder=dict(
         type='AdaptiveSparseEncoderV3Simple',
-        in_channels=4,  # Match vanilla input channels
+        in_channels=64,  # Match AdaptiveVFE output channels
         sparse_shape=[8, 160, 141],  # Correct for voxel_size [0.5, 0.5, 0.5]
         order=('conv', 'norm', 'act')),
     
