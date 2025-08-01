@@ -21,6 +21,34 @@ class_names = ['Pedestrian', 'Cyclist', 'Car']
 point_cloud_range = [0, -40, -3, 70.4, 40, 1]
 input_modality = dict(use_lidar=True, use_camera=False)
 
+# Override training pipeline to disable database sampling (missing kitti_dbinfos_train.pkl)
+train_pipeline = [
+    dict(
+        type='LoadPointsFromFile',
+        coord_type='LIDAR',
+        load_dim=4,
+        use_dim=4),
+    dict(type='LoadAnnotations3D', with_bbox_3d=True, with_label_3d=True),
+    # Remove ObjectSample (db_sampler) to avoid missing file error
+    dict(
+        type='ObjectNoise',
+        num_try=100,
+        translation_std=[1.0, 1.0, 0.5],
+        global_rot_range=[0.0, 0.0],
+        rot_range=[-0.78539816, 0.78539816]),
+    dict(type='RandomFlip3D', flip_ratio_bev_horizontal=0.5),
+    dict(
+        type='GlobalRotScaleTrans',
+        rot_range=[-0.78539816, 0.78539816],
+        scale_ratio_range=[0.95, 1.05]),
+    dict(type='PointsRangeFilter', point_cloud_range=point_cloud_range),
+    dict(type='ObjectRangeFilter', point_cloud_range=point_cloud_range),
+    dict(type='PointShuffle'),
+    dict(
+        type='Pack3DDetInputs',
+        keys=['points', 'gt_bboxes_3d', 'gt_labels_3d'])
+]
+
 # Model settings - OPTIMAL ADAPTIVE CONFIGURATION
 model = dict(
     type='VoxelNet',
@@ -131,7 +159,19 @@ model = dict(
         max_num=50))
 
 # Training settings
-train_dataloader = dict(batch_size=6, num_workers=4)
+train_dataloader = dict(
+    batch_size=6, 
+    num_workers=4,
+    dataset=dict(
+        type=dataset_type,
+        data_root=data_root,
+        ann_file='kitti_infos_train.pkl',
+        data_prefix=dict(pts='training/velodyne_reduced'),
+        pipeline=train_pipeline,
+        metainfo=dict(classes=class_names),
+        modality=input_modality,
+        test_mode=False,
+        box_type_3d='LiDAR'))
 val_dataloader = dict(batch_size=1, num_workers=1)
 test_dataloader = val_dataloader
 
