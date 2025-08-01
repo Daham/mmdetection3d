@@ -40,16 +40,10 @@ model = dict(
         feat_channels=[64],
         with_distance=False,
         voxel_size=[0.05, 0.05, 0.1],
-        with_cluster_center=True,
-        with_voxel_center=True,
         point_cloud_range=point_cloud_range,
-        norm_cfg=dict(type='BN1d', eps=1e-3, momentum=0.01),
-        # Adaptive settings
-        adaptive_type='density_based',  # Best for real-world performance
-        base_voxel_size=[0.05, 0.05, 0.1],
-        size_bounds=[0.5, 2.0],  # Conservative bounds for stability
-        learning_rate=0.001,  # Lower LR for stable adaptation
-        density_threshold=0.5),
+        base_sparse_shape=[41, 1600, 1408],
+        adaptation_method='density',  # 'density', 'content', 'multi_scale'
+        num_scales=3),
     
     # BEST: AdaptiveSparseEncoderV3Simple - optimal balance
     middle_encoder=dict(
