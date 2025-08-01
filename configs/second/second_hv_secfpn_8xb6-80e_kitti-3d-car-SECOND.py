@@ -36,3 +36,6 @@ model = dict(
 optim_wrapper = dict(
     optimizer=dict(type='AdamW', lr=0.0002, weight_decay=0.01)
 )
+
+# Override training epochs (base schedule defaults to 1 epoch)
+train_cfg = dict(max_epochs=2, val_interval=1)  # or however many epochs you want
