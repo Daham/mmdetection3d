@@ -190,7 +190,7 @@ default_hooks = dict(
 load_from = None
 resume_from = None
 
-# Explicit training loop configuration for 2 epochs
-train_cfg = dict(type='EpochBasedTrainLoop', max_epochs=2, val_interval=1)
-val_cfg = dict(type='ValLoop')
-test_cfg = dict(type='TestLoop')
+# Override training epochs to 2 (inherits by_epoch=True from base)
+train_cfg = dict(max_epochs=2, val_interval=1)
+val_cfg = dict()
+test_cfg = dict()
