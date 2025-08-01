@@ -162,16 +162,21 @@ model = dict(
 train_dataloader = dict(
     batch_size=6, 
     num_workers=4,
+    persistent_workers=True,
+    sampler=dict(type='DefaultSampler', shuffle=True),
     dataset=dict(
-        type=dataset_type,
-        data_root=data_root,
-        ann_file='kitti_infos_train.pkl',
-        data_prefix=dict(pts='training/velodyne_reduced'),
-        pipeline=train_pipeline,
-        metainfo=dict(classes=class_names),
-        modality=input_modality,
-        test_mode=False,
-        box_type_3d='LiDAR'))
+        type='RepeatDataset',
+        times=2,
+        dataset=dict(
+            type=dataset_type,
+            data_root=data_root,
+            ann_file='kitti_infos_train.pkl',
+            data_prefix=dict(pts='training/velodyne_reduced'),
+            pipeline=train_pipeline,
+            modality=input_modality,
+            test_mode=False,
+            metainfo=dict(classes=class_names),
+            box_type_3d='LiDAR')))
 val_dataloader = dict(batch_size=1, num_workers=1)
 test_dataloader = val_dataloader
 
