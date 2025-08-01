@@ -4,7 +4,7 @@
 
 _base_ = [
     '../_base_/datasets/kitti-3d-3class.py',
-    '../_base_/schedules/cyclic-80e.py', 
+    '../_base_/schedules/cyclic-2e.py', 
     '../_base_/default_runtime.py'
 ]
 
@@ -196,3 +196,8 @@ custom_hooks = [
 
 load_from = None
 resume_from = None
+
+# Explicit training loop configuration for 2 epochs
+train_cfg = dict(type='EpochBasedTrainLoop', max_epochs=2, val_interval=1)
+val_cfg = dict(type='ValLoop')
+test_cfg = dict(type='TestLoop')
