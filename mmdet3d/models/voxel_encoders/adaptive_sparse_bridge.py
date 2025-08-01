@@ -112,7 +112,7 @@ if TORCH_AVAILABLE:
             for out_dim in self.feat_channels:
                 layers.extend([
                     nn.Linear(in_dim, out_dim),
-                    nn.BatchNorm1d(out_dim),
+                    nn.LayerNorm(out_dim),  # Use LayerNorm instead of BatchNorm1d
                     nn.ReLU(),
                     nn.Dropout(0.1)
                 ])
@@ -202,6 +202,12 @@ if TORCH_AVAILABLE:
             THE KEY STEP: Map variable adaptive voxels to regular grid for sparse convolution.
             This solves the compatibility problem!
             """
+            if not adaptive_voxels:
+                # Handle empty case
+                device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+                return torch.zeros(0, self.feat_channels[-1], device=device), \
+                       torch.zeros(0, 4, dtype=torch.long, device=device)
+            
             device = next(iter(adaptive_voxels.values()))['points'][0].device
             pc_range = self.point_cloud_range.to(device)
             base_voxel = self.base_voxel_size.to(device)
@@ -217,15 +223,19 @@ if TORCH_AVAILABLE:
                 voxel_points = torch.stack(voxel_data['points'])
                 voxel_sizes = torch.stack(voxel_data['sizes'])
                 
-                # Extract features for each point
-                point_features = []
+                # Extract features for each point in batch
+                voxel_points_with_sizes = []
                 for j, (point, size) in enumerate(zip(voxel_points, voxel_sizes)):
                     # Add size information to point features
                     point_with_size = torch.cat([point, size])
-                    feature = self.feature_network(point_with_size.unsqueeze(0)).squeeze(0)
-                    point_features.append(feature)
+                    voxel_points_with_sizes.append(point_with_size)
                 
-                point_features = torch.stack(point_features)
+                # Process all points in this voxel as a batch
+                if voxel_points_with_sizes:
+                    batch_input = torch.stack(voxel_points_with_sizes)
+                    point_features = self.feature_network(batch_input)
+                else:
+                    continue
                 
                 # Map each point to regular grid coordinate
                 for point, feature, size in zip(voxel_points, point_features, voxel_sizes):
@@ -249,6 +259,11 @@ if TORCH_AVAILABLE:
                     regular_grid[reg_key]['features'].append(feature)
                     regular_grid[reg_key]['sizes'].append(size)
                     regular_grid[reg_key]['positions'].append(point[:3])
+            
+            # Handle case where no valid voxels were created
+            if not regular_grid:
+                return torch.zeros(0, self.feat_channels[-1], device=device), \
+                       torch.zeros(0, 4, dtype=torch.long, device=device)
             
             # Resolve conflicts using learned weights
             final_features = []
@@ -281,7 +296,7 @@ if TORCH_AVAILABLE:
                     final_feature = (features * weights.unsqueeze(-1)).sum(dim=0)
                 
                 final_features.append(final_feature)
-                final_coords.append(torch.tensor([0, reg_key[2], reg_key[1], reg_key[0]], dtype=torch.long))
+                final_coords.append(torch.tensor([0, reg_key[2], reg_key[1], reg_key[0]], dtype=torch.long, device=device))
             
             if final_features:
                 final_features = torch.stack(final_features)
