@@ -25,7 +25,7 @@ model = dict(
         adaptation_method='learned',                 # Learn voxel sizes
         max_points_per_voxel=32,
         in_channels=4,
-        feat_channels=[64],
+        feat_channels=[4],                           # Output 4 channels to match middle encoder
         learnable_adaptation=True),                  # Enable learning
     
     # Standard sparse convolution works with the bridge output
