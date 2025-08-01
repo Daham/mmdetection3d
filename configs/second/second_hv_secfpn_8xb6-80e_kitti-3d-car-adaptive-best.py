@@ -179,13 +179,13 @@ default_hooks = dict(
     sampler_seed=dict(type='DistSamplerSeedHook'),
     visualization=dict(type='Det3DVisualizationHook'))
 
-# Custom hooks for adaptive monitoring
-custom_hooks = [
-    dict(type='AdaptiveMonitorHook',
-         log_interval=100,
-         monitor_size_factors=True,
-         monitor_middle_encoder=True)
-]
+# Custom hooks for adaptive monitoring - commented out until implemented
+# custom_hooks = [
+#     dict(type='AdaptiveMonitorHook',
+#          log_interval=100,
+#          monitor_size_factors=True,
+#          monitor_middle_encoder=True)
+# ]
 
 load_from = None
 resume_from = None
