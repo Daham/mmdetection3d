@@ -98,13 +98,6 @@ model = dict(
             reshape_out=False),
         assigner_per_size=False,
         diff_rad_by_sin=True,
-        assign_cfg=dict(
-            type='Max3DIoUAssigner',
-            iou_calculator=dict(type='BboxOverlapsNearest3D'),
-            pos_iou_thr=0.5,
-            neg_iou_thr=0.35,
-            min_pos_iou=0.35,
-            ignore_iof_thr=-1),
         bbox_coder=dict(type='DeltaXYZWLHRBBoxCoder'),
         loss_cls=dict(
             type='FocalLoss',
