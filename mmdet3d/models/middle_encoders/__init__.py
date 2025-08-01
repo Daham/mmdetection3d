@@ -2,10 +2,12 @@
 from .pillar_scatter import PointPillarsScatter
 from .sparse_encoder import SparseEncoder, SparseEncoderSASSD
 # from .adaptive_sparse_encoder import AdaptiveSparseEncoder  # Disabled due to spconv dependency
+from .adaptive_sparse_encoder_v3 import AdaptiveSparseEncoderV3, AdaptiveSparseEncoderV3Simple
 from .sparse_unet import SparseUNet
 from .voxel_set_abstraction import VoxelSetAbstraction
 
 __all__ = [
     'PointPillarsScatter', 'SparseEncoder', 'SparseEncoderSASSD',  # 'AdaptiveSparseEncoder',
+    'AdaptiveSparseEncoderV3', 'AdaptiveSparseEncoderV3Simple',
     'SparseUNet', 'VoxelSetAbstraction'
 ]
