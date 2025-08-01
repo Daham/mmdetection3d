@@ -2,6 +2,10 @@
 # OPTIMAL CONFIG FOR ADAPTIVE VOXELIZATION
 # Using AdaptiveSparseEncoderV3Simple as the best balance of performance and adaptivity
 
+# Import custom modules to ensure registration
+from mmdet3d.models.voxel_encoders.adaptive_vfe import AdaptiveVFE
+from mmdet3d.models.middle_encoders.adaptive_sparse_encoder_v3 import AdaptiveSparseEncoderV3Simple
+
 _base_ = [
     '../_base_/datasets/kitti-3d-3class.py',
     '../_base_/schedules/cyclic-2e.py', 
