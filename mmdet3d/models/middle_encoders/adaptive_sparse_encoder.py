@@ -22,6 +22,7 @@ from mmengine.model import BaseModule
 from typing import Dict, List, Tuple, Optional
 
 from mmdet3d.models.layers.spconv import IS_SPCONV2_AVAILABLE
+from mmdet3d.models.layers import make_sparse_convmodule
 from mmdet3d.registry import MODELS
 
 if IS_SPCONV2_AVAILABLE:
@@ -76,6 +77,7 @@ class AdaptiveSparseEncoder(BaseModule):
         self.sparse_shape = sparse_shape
         self.in_channels = in_channels
         self.order = order
+        self.norm_cfg = norm_cfg
         self.base_channels = base_channels
         self.output_channels = output_channels
         self.encoder_channels = encoder_channels
@@ -95,6 +97,17 @@ class AdaptiveSparseEncoder(BaseModule):
         
         # Build fusion module
         self._build_fusion_module()
+        
+        # Build final output convolution (like standard SparseEncoder)
+        self.conv_out = make_sparse_convmodule(
+            self.output_channels,
+            self.output_channels,
+            kernel_size=(3, 1, 1),
+            stride=(2, 1, 1),
+            norm_cfg=norm_cfg,
+            padding=0,
+            indice_key='adaptive_down2',
+            conv_type='SparseConv3d')
         
         print(f"🔬 AdaptiveSparseEncoder initialized with {num_size_groups} size-specific pathways")
         print(f"   Size ranges: {size_group_ranges}")
@@ -288,7 +301,7 @@ class AdaptiveSparseEncoder(BaseModule):
             voxel_sizes: [N,] learned voxel sizes (REQUIRED for adaptive processing)
             
         Returns:
-            Processed features maintaining full adaptivity
+            spatial_features: [N, C*D, H, W] dense tensor for backbone
         """
         if voxel_sizes is None:
             raise ValueError("voxel_sizes is required for adaptive sparse convolution")
@@ -324,13 +337,32 @@ class AdaptiveSparseEncoder(BaseModule):
             # Fallback if no voxels (shouldn't happen in practice)
             final_features = torch.zeros_like(voxel_features[:, :self.output_channels])
         
+        # Create final sparse tensor for conv_out and dense conversion
+        final_sparse_tensor = SparseConvTensor(
+            features=final_features,
+            indices=coors,
+            spatial_shape=self.sparse_shape,
+            batch_size=batch_size
+        )
+        
+        # Apply final convolution (like standard SparseEncoder)
+        out = self.conv_out(final_sparse_tensor)
+        
+        # Convert to dense format [N, C, D, H, W]
+        spatial_features = out.dense()
+        
+        # Reshape for 2D backbone: [N, C, D, H, W] -> [N, C*D, H, W]
+        N, C, D, H, W = spatial_features.shape
+        spatial_features = spatial_features.view(N, C * D, H, W)
+        
         # Research statistics
         if self.training and torch.rand(1).item() < 0.01:  # 1% detailed logging
             print(f"📊 Adaptive Sparse Encoder Stats:")
             print(f"   - Total voxels: {voxel_features.size(0)}")
             print(f"   - Active size groups: {len(pathway_outputs)}/{self.num_size_groups}")
+            print(f"   - Final output shape: {spatial_features.shape}")
             print(f"   - Voxel size distribution:")
             for group_id, group_data in size_groups.items():
                 print(f"     Group {group_id}: {group_data['count']} voxels ({group_data['count']/voxel_features.size(0)*100:.1f}%)")
         
-        return final_features
+        return spatial_features
