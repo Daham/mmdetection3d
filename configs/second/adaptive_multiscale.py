@@ -143,15 +143,8 @@ optim_wrapper = dict(
     )
 )
 
-# Enhanced training/testing configs
-train_cfg = dict(
-    type='EpochBasedTrainLoop',
-    max_epochs=40,
-    val_interval=1
-)
-
-val_cfg = dict(type='ValLoop')
-test_cfg = dict(type='TestLoop')
+# Enhanced training/testing configs - inherit from base schedule
+# No need to override train_cfg, val_cfg, test_cfg - they come from cyclic-40e.py
 
 # PhD Research Notes:
 print("🚗 Multi-Scale Adaptive Sparse Convolution Configuration Loaded")
