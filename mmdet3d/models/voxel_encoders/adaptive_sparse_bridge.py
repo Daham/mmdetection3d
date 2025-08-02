@@ -79,14 +79,6 @@ if TORCH_AVAILABLE:
             # Learnable global voxel size bias (per-region adaptation)
             self.global_size_bias = nn.Parameter(torch.zeros(learnable_voxel_dims))
             
-            # Learnable spatial attention for voxel size prediction
-            self.spatial_attention = nn.MultiheadAttention(
-                embed_dim=spatial_encoding_dim,
-                num_heads=8,
-                dropout=0.1,
-                batch_first=True
-            )
-            
             # Feature aggregation with learnable voxel awareness
             self.voxel_aware_aggregator = nn.Sequential(
                 nn.Linear(num_features + learnable_voxel_dims, num_features * 2),
@@ -100,11 +92,12 @@ if TORCH_AVAILABLE:
             self.register_buffer('target_grid_y', torch.linspace(-40, 40, grid_resolution[0])) 
             self.register_buffer('target_grid_z', torch.linspace(-3, 1, grid_resolution[2]))
             
-            print(f"🎓 PhD Research: Learnable Adaptive Voxelization")
+            print(f"🎓 PhD Research: Memory-Efficient Learnable Adaptive Voxelization")
             print(f"   - Learnable voxel dims: {learnable_voxel_dims}")
             print(f"   - Size range: [{min_voxel_size}, {max_voxel_size}]")
             print(f"   - Spatial encoding: {spatial_encoding_dim}D")
             print(f"   - Predictor hidden: {voxel_predictor_hidden}")
+            print(f"   - Memory-efficient spatial refinement (no massive attention matrices)")
             print(f"   📊 Voxel sizes are FULLY LEARNABLE through backpropagation")
 
         def learn_optimal_voxel_sizes(self, features, num_points, coors):
@@ -164,25 +157,43 @@ if TORCH_AVAILABLE:
 
         def apply_spatial_attention_to_sizes(self, spatial_features, learned_sizes):
             """
-            PhD Research: Apply attention mechanism to refine voxel size learning
+            PhD Research: Apply efficient spatial refinement to voxel size learning
             
-            This allows the network to consider relationships between nearby
-            voxels when determining optimal sizes.
+            Memory-efficient approach that avoids massive attention matrices.
+            Uses local neighborhood averaging instead of full multi-head attention.
             """
             if spatial_features.size(0) < 2:
                 return learned_sizes
             
-            # Apply multi-head attention to spatial features
-            attended_features, _ = self.spatial_attention(
-                spatial_features.unsqueeze(0),
-                spatial_features.unsqueeze(0),
-                spatial_features.unsqueeze(0)
-            )
-            attended_features = attended_features.squeeze(0)
+            # Memory-efficient alternative to multi-head attention
+            # Use simple feature smoothing for spatial consistency
+            batch_size = spatial_features.size(0)
             
-            # Use attended features to refine voxel sizes
-            refinement = torch.tanh(attended_features.mean(dim=-1, keepdim=True)) * 0.1
-            refined_sizes = learned_sizes + refinement.expand_as(learned_sizes)
+            # Limit processing to avoid memory issues
+            max_voxels_per_batch = 1000
+            if batch_size > max_voxels_per_batch:
+                # Process in chunks to avoid memory explosion
+                chunk_size = max_voxels_per_batch
+                refined_sizes_list = []
+                
+                for i in range(0, batch_size, chunk_size):
+                    end_idx = min(i + chunk_size, batch_size)
+                    chunk_features = spatial_features[i:end_idx]
+                    chunk_sizes = learned_sizes[i:end_idx]
+                    
+                    # Simple local averaging for spatial consistency
+                    feature_mean = chunk_features.mean(dim=0, keepdim=True)
+                    refinement = torch.tanh((chunk_features - feature_mean).mean(dim=-1, keepdim=True)) * 0.05
+                    chunk_refined = chunk_sizes + refinement.expand_as(chunk_sizes)
+                    
+                    refined_sizes_list.append(chunk_refined)
+                
+                refined_sizes = torch.cat(refined_sizes_list, dim=0)
+            else:
+                # For smaller batches, use simple feature-based refinement
+                feature_mean = spatial_features.mean(dim=0, keepdim=True)
+                refinement = torch.tanh((spatial_features - feature_mean).mean(dim=-1, keepdim=True)) * 0.05
+                refined_sizes = learned_sizes + refinement.expand_as(learned_sizes)
             
             # Clamp to valid range
             refined_sizes = torch.clamp(refined_sizes, self.min_voxel_size, self.max_voxel_size)

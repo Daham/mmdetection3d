@@ -40,8 +40,8 @@ model = dict(
         initial_bias=0.2,           # PhD: Initial size bias (learnable)
         
         # Neural network for size prediction
-        hidden_size=64,             # PhD: Hidden layer size for size predictor
-        spatial_attention_heads=4,   # PhD: Multi-head attention for spatial refinement
+        voxel_predictor_hidden=128,  # PhD: Hidden layer size for size predictor
+        spatial_encoding_dim=64,     # PhD: Spatial feature encoding dimension
         
         # Feature processing
         voxel_aware_hidden=128,     # PhD: Hidden size for voxel-aware processing
