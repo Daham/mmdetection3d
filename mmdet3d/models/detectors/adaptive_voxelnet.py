@@ -1,52 +1,134 @@
-# mmdet3d/models/detectors/adaptive_voxelnet.py
+"""
+PhD Research: Adaptive VoxelNet for Multi-Scale Sparse Convolution
 
+This detector extends the standard VoxelNet to support the flow of learned
+voxel sizes from the adaptive voxel encoder to the multi-scale sparse encoder.
+
+Key Innovation:
+- Voxel encoder learns optimal sizes for each voxel
+- These sizes are passed to the multi-scale sparse encoder
+- Each size group gets its own processing pathway
+- True end-to-end adaptive voxelization!
+
+Author: PhD Research Implementation
+Date: August 2025
+"""
+
+from typing import Dict, Union, Optional
 import torch
+from torch import Tensor
+
 from mmdet3d.registry import MODELS
 from .voxelnet import VoxelNet
 
-# @MODELS.register_module()  # Disabled for compatibility
+
+@MODELS.register_module()
 class AdaptiveVoxelNet(VoxelNet):
     """
-    VoxelNet variant that supports learnable voxel sizes.
+    PhD Research: VoxelNet with Adaptive Multi-Scale Sparse Convolution
     
-    This detector properly handles the enhanced output from LearnableVFE
-    including scaled coordinates and dynamic sparse shapes.
+    This detector enables true adaptive voxelization by:
+    1. Using adaptive voxel encoder that learns optimal voxel sizes
+    2. Passing these sizes to multi-scale sparse encoder
+    3. Processing different voxel sizes through dedicated pathways
+    4. Maintaining end-to-end differentiability
+    
+    The key innovation is the communication between voxel encoder and
+    middle encoder to enable true adaptive processing.
     """
     
-    def extract_feat(self, batch_inputs_dict):
-        """Extract features from points."""
-        voxel_dict = batch_inputs_dict['voxels']
+    def extract_feat(self, batch_inputs_dict: dict, batch_data_samples=None) -> Tensor:
+        """
+        PhD Research: Feature extraction with adaptive voxel size flow
+        
+        This method extracts features while passing learned voxel sizes
+        from the voxel encoder to the middle encoder for multi-scale processing.
+        """
+        voxel_dict = batch_inputs_dict.get('voxels', None)
+        if voxel_dict is None or voxel_dict.get('voxels', None) is None:
+            return None
+        
         voxel_features = voxel_dict['voxels']
         num_points = voxel_dict['num_points']
         coors = voxel_dict['coors']
-        batch_size = coors[-1, 0] + 1
-
-        # Enhanced VFE forward pass
-        vfe_output = self.voxel_encoder(voxel_features, num_points, coors)
         
-        # Handle different return formats from LearnableVFE
-        if isinstance(vfe_output, tuple) and len(vfe_output) == 3:
-            # LearnableVFE returns (features, scaled_coors, scale_factor)
-            voxel_features, scaled_coors, scale_factor = vfe_output
-            use_adaptive = True
-        else:
-            # Standard VFE returns only features
-            voxel_features = vfe_output
-            scaled_coors = coors
-            scale_factor = None
-            use_adaptive = False
-
-        # Middle encoder processing
-        if hasattr(self.middle_encoder, 'forward') and use_adaptive:
-            # Use adaptive sparse encoder if available
-            if 'scale_factor' in self.middle_encoder.forward.__code__.co_varnames:
-                x = self.middle_encoder(voxel_features, scaled_coors, 
-                                      batch_size, scale_factor)
+        # PhD Research: Extract features AND learned voxel sizes
+        batch_size = coors[-1, 0].item() + 1
+        
+        # Check if we have an adaptive voxel encoder
+        if hasattr(self.voxel_encoder, 'last_voxel_sizes'):
+            # Standard voxel feature extraction
+            voxel_features = self.voxel_encoder(voxel_features, num_points, coors)
+            
+            # PhD Research: Get learned voxel sizes from encoder
+            learned_voxel_sizes = self.voxel_encoder.last_voxel_sizes
+            
+            # Check if we have an adaptive middle encoder
+            if hasattr(self.middle_encoder, 'group_voxels_by_size'):
+                # PhD Research: Pass voxel sizes to multi-scale encoder
+                x = self.middle_encoder(
+                    voxel_features, coors, batch_size, 
+                    voxel_sizes=learned_voxel_sizes
+                )
             else:
-                x = self.middle_encoder(voxel_features, scaled_coors, batch_size)
+                # Fallback to standard middle encoder
+                print("⚠️  Warning: Using standard middle encoder - adaptive voxel sizes not utilized")
+                x = self.middle_encoder(voxel_features, coors, batch_size)
         else:
-            # Standard middle encoder
+            # Standard VoxelNet processing
+            voxel_features = self.voxel_encoder(voxel_features, num_points, coors)
             x = self.middle_encoder(voxel_features, coors, batch_size)
+        
+        # Continue with standard backbone and neck processing
+        x = self.backbone(x)
+        if self.with_neck:
+            x = self.neck(x)
+        
+        return x
+    
+    def forward(self, 
+                inputs: Dict, 
+                data_samples: Optional[list] = None,
+                mode: str = 'tensor',
+                **kwargs):
+        """
+        PhD Research: Forward pass with adaptive voxelization
+        
+        Supports all standard VoxelNet modes while enabling adaptive processing.
+        """
+        if mode == 'loss':
+            return self.loss(inputs, data_samples, **kwargs)
+        elif mode == 'predict':
+            return self.predict(inputs, data_samples, **kwargs)
+        elif mode == 'tensor':
+            return self._forward(inputs, data_samples, **kwargs)
+        else:
+            raise RuntimeError(f'Invalid mode "{mode}".')
+    
+    def _forward(self, batch_inputs_dict: dict, batch_data_samples=None, **kwargs):
+        """Internal forward for tensor mode"""
+        return self.extract_feat(batch_inputs_dict, batch_data_samples)
+    
+    def loss(self, batch_inputs_dict: dict, batch_data_samples, **kwargs):
+        """PhD Research: Loss computation with adaptive features"""
+        x = self.extract_feat(batch_inputs_dict, batch_data_samples)
+        losses = self.bbox_head.loss(x, batch_data_samples, **kwargs)
+        
+        # PhD Research: Enhanced logging for adaptive voxelization analysis
+        if hasattr(self.voxel_encoder, 'last_voxel_sizes') and torch.rand(1).item() < 0.02:
+            voxel_sizes = self.voxel_encoder.last_voxel_sizes
+            print(f"🔬 Adaptive VoxelNet Training Stats:")
+            print(f"   - Batch voxel count: {len(voxel_sizes)}")
+            print(f"   - Size range: [{voxel_sizes.min():.3f}, {voxel_sizes.max():.3f}]")
+            print(f"   - Size std: {voxel_sizes.std():.4f}")
+            print(f"   - Loss: {losses['loss_cls']:.4f} (cls), {losses['loss_bbox']:.4f} (bbox)")
+        
+        return losses
+    
+    def predict(self, batch_inputs_dict: dict, batch_data_samples, **kwargs):
+        """PhD Research: Prediction with adaptive features"""
+        x = self.extract_feat(batch_inputs_dict, batch_data_samples)
+        return self.bbox_head.predict(x, batch_data_samples, **kwargs)
 
         # Backbone processing
         if self.with_neck:

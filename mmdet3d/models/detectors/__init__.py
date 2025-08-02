@@ -21,10 +21,10 @@ from .smoke_mono3d import SMOKEMono3D
 from .ssd3dnet import SSD3DNet
 from .votenet import VoteNet
 from .voxelnet import VoxelNet
-# from .adaptive_voxelnet import AdaptiveVoxelNet  # Disabled for compatibility
+from .adaptive_voxelnet import AdaptiveVoxelNet
 
 __all__ = [
-    'Base3DDetector', 'VoxelNet', 'DynamicVoxelNet', 'MVXTwoStageDetector',  # 'AdaptiveVoxelNet',
+    'Base3DDetector', 'VoxelNet', 'AdaptiveVoxelNet', 'DynamicVoxelNet', 'MVXTwoStageDetector',
     'DynamicMVXFasterRCNN', 'MVXFasterRCNN', 'PartA2', 'VoteNet', 'H3DNet',
     'CenterPoint', 'SSD3DNet', 'ImVoteNet', 'SingleStageMono3DDetector',
     'FCOSMono3D', 'ImVoxelNet', 'GroupFree3DNet', 'PointRCNN', 'SMOKEMono3D',

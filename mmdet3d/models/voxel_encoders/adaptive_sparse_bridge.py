@@ -250,10 +250,9 @@ if TORCH_AVAILABLE:
             voxel_aware_input = torch.cat([base_features, refined_voxel_sizes], dim=-1)
             enhanced_features = self.voxel_aware_aggregator(voxel_aware_input)
             
-            # PhD Research Component 4: Regular Grid Remapping
-            final_features, regular_coords = self.remap_to_regular_grid(
-                enhanced_features, coors, refined_voxel_sizes.mean(dim=-1)
-            )
+            # PhD Research Component 4: For Multi-Scale Sparse Encoder Compatibility
+            # Return both features and learned voxel sizes
+            voxel_sizes_1d = refined_voxel_sizes.mean(dim=-1)  # [N,] average size per voxel
             
             # Research logging (for thesis validation)
             if self.training and torch.rand(1).item() < 0.01:  # Log 1% of the time
@@ -263,7 +262,10 @@ if TORCH_AVAILABLE:
                 print(f"   - Size variance: {refined_voxel_sizes.var():.6f}")
                 print(f"   - Gradient norms: {[p.grad.norm().item() if p.grad is not None else 0 for p in self.voxel_size_predictor.parameters() if p.requires_grad]}")
             
-            return final_features.contiguous()
+            # Store voxel sizes for middle encoder (new approach)
+            self.last_voxel_sizes = voxel_sizes_1d
+            
+            return enhanced_features.contiguous()
 
 else:
     class AdaptiveSparseBridge:
