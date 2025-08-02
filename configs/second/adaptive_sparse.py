@@ -35,8 +35,7 @@ model = dict(
         min_voxel_size=[0.25, 0.25, 0.25],          # Fine detail voxels
         max_voxel_size=[1.0, 1.0, 1.0],             # Coarse area voxels  
         num_features=4,
-        adaptation_levels=3,                         # Number of size levels
-        learnable_adaptation=True),                  # Enable neural adaptation
+        learnable_adaptation=True),                  # Efficient neural adaptation
     
     # Standard sparse convolution works with the bridge output
     bbox_head=dict(num_classes=1))
