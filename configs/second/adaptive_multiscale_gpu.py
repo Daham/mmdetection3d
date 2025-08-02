@@ -1,17 +1,12 @@
 """
-Adaptive Voxelization Research Configuration
+Adaptive Voxelization GPU Configuration
 
-This configuration implements learnable adaptive voxelization for 3D object detection:
-1. Voxel sizes are learned adaptively via neural networks
-2. Each voxel size group gets its own sparse convolution pathway  
-3. Multiple pathways process different voxel sizes in parallel
-4. Results are fused using attention mechanisms
-
+This is a standalone config file for testing on GPU machines.
 Update the data_root path below to point to your KITTI dataset.
 """
 
 # =============================================================================
-# DATASET CONFIGURATION - UPDATE THIS FOR YOUR MACHINE
+# DATASET CONFIGURATION - UPDATE THIS FOR YOUR GPU MACHINE
 # =============================================================================
 data_root = 'data/kitti/'  # ⚠️ UPDATE THIS PATH TO YOUR KITTI DATASET
 dataset_type = 'KittiDataset'
@@ -35,7 +30,7 @@ model = dict(
             point_cloud_range=point_cloud_range,
             voxel_size=[0.05, 0.05, 0.1])),
     
-    # 🎓 Research: Learnable Adaptive Voxel Encoder
+    # 🎓 PhD Research: Learnable Adaptive Voxel Encoder
     voxel_encoder=dict(
         type='AdaptiveSparseBridge',
         num_features=4,
@@ -47,7 +42,7 @@ model = dict(
         voxel_aware_hidden=128,
     ),
     
-    # 🔬 Research: Multi-Scale Sparse Encoder  
+    # 🔬 PhD Research: Multi-Scale Sparse Encoder  
     middle_encoder=dict(
         type='AdaptiveSparseEncoder',
         in_channels=4,
@@ -278,7 +273,7 @@ train_cfg = dict(type='EpochBasedTrainLoop', max_epochs=40, val_interval=1)
 val_cfg = dict(type='ValLoop')
 test_cfg = dict(type='TestLoop')
 
-# 🎓 Research: Enhanced Learning Rates for Adaptive Components
+# 🎓 PhD Research: Enhanced Learning Rates for Adaptive Components
 optim_wrapper = dict(
     type='OptimWrapper',
     optimizer=dict(type='AdamW', lr=0.001, betas=(0.95, 0.99), weight_decay=0.01),
@@ -357,7 +352,7 @@ resume = False
 print("🚗 Multi-Scale Adaptive Sparse Convolution Configuration Loaded")
 print("🔬 Research Features:")
 print("   ✅ Learnable voxel sizes via neural networks")
-print("   ✅ 4 parallel size-specific processing pathways")  
+print("   ✅ 4 parallel size-specific processing pathways")
 print("   ✅ Attention-based fusion of multi-scale features")
 print("   ✅ No regular grid remapping - maintains full adaptivity")
 print("   ✅ Enhanced learning rates for adaptive components")
@@ -365,5 +360,5 @@ print("   ✅ Research logging for voxel size analysis")
 print("📊 This enables PhD research on:")
 print("   - How learned voxel sizes improve detection accuracy")
 print("   - What size patterns emerge for different object types")
-print("   - Multi-scale feature fusion strategies")
+print("   - Multi-scale feature fusion strategies")  
 print("   - Computational efficiency of size-specific pathways")
