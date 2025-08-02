@@ -55,8 +55,8 @@ class AdaptiveVoxelNet(VoxelNet):
         # PhD Research: Extract features AND learned voxel sizes
         batch_size = coors[-1, 0].item() + 1
         
-        # Check if we have an adaptive voxel encoder
-        if hasattr(self.voxel_encoder, 'last_voxel_sizes'):
+        # Check if we have an adaptive voxel encoder by type
+        if hasattr(self.voxel_encoder, '__class__') and 'AdaptiveSparseBridge' in str(self.voxel_encoder.__class__):
             # Standard voxel feature extraction
             voxel_features = self.voxel_encoder(voxel_features, num_points, coors)
             
