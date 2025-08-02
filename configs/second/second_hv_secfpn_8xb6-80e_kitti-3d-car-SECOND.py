@@ -37,5 +37,15 @@ optim_wrapper = dict(
     optimizer=dict(type='AdamW', lr=0.0002, weight_decay=0.01)
 )
 
-# Override training epochs (base schedule defaults to 1 epoch)
-train_cfg = dict(max_epochs=2, val_interval=1)  # or however many epochs you want
+
+# Use iteration-based training and log every 50 iterations
+train_cfg = dict(
+    type='IterBasedTrainLoop',
+    max_iters=1000,
+    val_interval=50
+)
+
+default_hooks = dict(
+    logger=dict(interval=50, type='LoggerHook'),
+    checkpoint=dict(interval=-1, type='CheckpointHook'),
+)
