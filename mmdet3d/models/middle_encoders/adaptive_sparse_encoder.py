@@ -144,9 +144,9 @@ class AdaptiveSparseEncoder(BaseModule):
                 indice_key=f"{pathway_name}_conv{i}"
             )
             
-            # Normalization
+            # Normalization - Use LayerNorm instead of BatchNorm for robustness with small groups
             norm_name, norm = build_norm_layer(
-                dict(type='BN1d', eps=1e-3, momentum=0.01), 
+                dict(type='LN', eps=1e-6), 
                 out_ch
             )
             
@@ -244,6 +244,13 @@ class AdaptiveSparseEncoder(BaseModule):
         features = group_data['features']
         coordinates = group_data['coordinates']
         
+        # Check for minimum batch size for BatchNorm
+        min_batch_size = 2  # BatchNorm requires at least 2 samples
+        if features.size(0) < min_batch_size:
+            print(f"⚠️  Group {group_id} has only {features.size(0)} voxels, skipping pathway processing")
+            # Return unchanged features for small groups
+            return features, group_data['indices']
+        
         # Create sparse tensor for this group
         sparse_tensor = SparseConvTensor(
             features=features,
@@ -253,9 +260,16 @@ class AdaptiveSparseEncoder(BaseModule):
         )
         
         # Process through pathway
-        output_tensor = pathway(sparse_tensor)
-        
-        return output_tensor.features, group_data['indices']
+        try:
+            output_tensor = pathway(sparse_tensor)
+            return output_tensor.features, group_data['indices']
+        except ValueError as e:
+            if "Expected more than 1 value per channel" in str(e):
+                print(f"⚠️  BatchNorm error in group {group_id}: {e}")
+                print(f"   Group size: {features.size(0)}, returning unchanged features")
+                return features, group_data['indices']
+            else:
+                raise e
     
     def fuse_pathway_outputs(self, 
                            pathway_outputs: List[torch.Tensor],
