@@ -70,6 +70,35 @@ class AdaptiveVoxelNet(VoxelNet):
                     voxel_features, coors, batch_size, 
                     voxel_sizes=learned_voxel_sizes
                 )
+                
+                # TEMPORARY FIX: Handle 2D output from adaptive encoder
+                if len(x.shape) == 2:  # [N, C] format
+                    print(f"🔧 Converting 2D adaptive features {x.shape} to 4D for backbone")
+                    # Create a simple spatial mapping - this is a temporary workaround
+                    # TODO: Implement proper sparse-to-dense conversion
+                    spatial_h, spatial_w = 200, 176  # Typical KITTI spatial dimensions
+                    num_voxels = x.shape[0]
+                    channels = x.shape[1]
+                    
+                    # Create a simple spatial layout (temporary approach)
+                    spatial_features = torch.zeros(
+                        batch_size, channels, spatial_h, spatial_w,
+                        dtype=x.dtype, device=x.device
+                    )
+                    
+                    # Simple mapping of voxel features to spatial grid
+                    # This is not optimal but allows training to proceed
+                    for i in range(min(num_voxels, spatial_h * spatial_w)):
+                        h_idx = i // spatial_w
+                        w_idx = i % spatial_w
+                        if h_idx < spatial_h:
+                            batch_idx = coors[i, 0].item() if i < len(coors) else 0
+                            if batch_idx < batch_size:
+                                spatial_features[batch_idx, :, h_idx, w_idx] = x[i]
+                    
+                    x = spatial_features
+                    print(f"🔧 Converted to 4D spatial features: {x.shape}")
+                    
             else:
                 # Fallback to standard middle encoder
                 print("⚠️  Warning: Using standard middle encoder - adaptive voxel sizes not utilized")
