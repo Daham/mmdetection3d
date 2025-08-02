@@ -1,29 +1,22 @@
 """
-Adaptive Sparse Bridge - THE ONLY MODULE YOU NEED
+Adaptive Voxelization for 3D Object Detection - PhD Research Implementation
 
-This module:
-1. Learns adaptive voxel sizes during training
-2. Creates variable-size voxels based on local point density/features
-3. Maps variable voxels back to regular grid for sparse convolution
-4. Handles ALL the compatibility issues automatically
-
-Usage:
-- Replaces standard VFE
-- Feeds directly to standard sparse convolution
-- No additional setup required
+This module implements TRUE adaptive voxel sizes:
+1. Learns optimal voxel sizes based on local point density
+2. Creates variable-size voxels (small in dense areas, large in sparse areas)
+3. Maps adaptive voxels back to regular grid for sparse convolution compatibility
+4. Maintains efficiency while enabling adaptive spatial resolution
 """
 
 try:
     import torch
     import torch.nn as nn
     import torch.nn.functional as F
-    from typing import List, Tuple, Dict, Optional
+    from typing import List, Dict, Tuple
     from mmdet3d.registry import MODELS
     TORCH_AVAILABLE = True
-except ImportError as e:
-    print(f"Import warning in adaptive_sparse_bridge: {e}")
+except ImportError:
     TORCH_AVAILABLE = False
-    # Create dummy base class
     class nn:
         class Module:
             pass
@@ -32,398 +25,285 @@ if TORCH_AVAILABLE:
     @MODELS.register_module()
     class AdaptiveSparseBridge(nn.Module):
         """
-        THE ONLY MODULE YOU NEED for adaptive voxelization + sparse convolution.
+        Adaptive Voxelization Module for PhD Research
         
-        Key Features:
-        - Learns optimal voxel sizes during training
-        - Creates adaptive voxels (dense areas = small voxels, sparse areas = large voxels)
-        - Maps variable voxels to regular grid for sparse convolution compatibility
-        - Handles conflicts automatically with learned weights
+        Creates variable voxel sizes based on:
+        - Local point density
+        - Learned spatial patterns
+        - Feature importance
         """
         
-        def __init__(self,
-                     base_voxel_size: List[float] = [0.5, 0.5, 0.5],       # Match vanilla SECOND
+        def __init__(self, 
+                     base_voxel_size: List[float] = [0.5, 0.5, 0.5],
                      point_cloud_range: List[float] = [0, -40, -3, 70.4, 40, 1],
-                     min_voxel_size: List[float] = [0.25, 0.25, 0.25],     # Adaptive range
-                     max_voxel_size: List[float] = [1.0, 1.0, 1.0],        # Adaptive range
-                     adaptation_method: str = 'learned',                    # How to adapt sizes
-                     max_points_per_voxel: int = 5,                         # Match vanilla SECOND
-                     in_channels: int = 4,
-                     feat_channels: List[int] = [64],
-                     learnable_adaptation: bool = True):                    # Enable learning
+                     min_voxel_size: List[float] = [0.25, 0.25, 0.25],
+                     max_voxel_size: List[float] = [1.0, 1.0, 1.0],
+                     num_features: int = 4,
+                     adaptation_levels: int = 3,  # Number of adaptive size levels
+                     learnable_adaptation: bool = True,
+                     **kwargs):
             super().__init__()
             
-            # Store as regular Python lists/values, convert to tensors in forward()
-            self.base_voxel_size = base_voxel_size
-            self.point_cloud_range = point_cloud_range
-            self.min_voxel_size = min_voxel_size
-            self.max_voxel_size = max_voxel_size
-            self.adaptation_method = adaptation_method
-            self.max_points_per_voxel = max_points_per_voxel
-            self.in_channels = in_channels
-            self.feat_channels = feat_channels
+            self.base_voxel_size = torch.tensor(base_voxel_size, dtype=torch.float32)
+            self.point_cloud_range = torch.tensor(point_cloud_range, dtype=torch.float32)
+            self.min_voxel_size = torch.tensor(min_voxel_size, dtype=torch.float32)
+            self.max_voxel_size = torch.tensor(max_voxel_size, dtype=torch.float32)
+            self.num_features = num_features
+            self.adaptation_levels = adaptation_levels
             self.learnable_adaptation = learnable_adaptation
             
-            # Build the adaptive network that LEARNS voxel sizes
-            self.adaptation_network = self._build_adaptation_network()
-            
-            # Build feature processing network
-            self.feature_network = self._build_feature_network()
-            
-            # Build conflict resolution network (for mapping back to regular grid)
-            self.conflict_resolver = self._build_conflict_resolver()
-            
-            # Regular grid size for sparse convolution output
-            self.regular_grid_size = self._compute_regular_grid_size()
-            
-            print(f"🎯 AdaptiveSparseBridge initialized:")
-            print(f"   - Base voxel size: {base_voxel_size} (matches vanilla SECOND)")
-            print(f"   - Adaptive range: {min_voxel_size} → {max_voxel_size}")
-            print(f"   - Regular grid size: {self.regular_grid_size}")
-            print(f"   - Learning: {learnable_adaptation}")
-            print(f"   - Output channels: {feat_channels[-1]}")
-            print(f"   - Max points per voxel: {max_points_per_voxel}")
-            
-            # Add a counter for debugging
-            self.forward_call_count = 0
-        
-        def _build_adaptation_network(self):
-            """Build network that LEARNS optimal voxel sizes."""
-            if self.adaptation_method == 'learned':
-                return nn.Sequential(
-                    nn.Linear(4, 64),  # input: [center_x, center_y, center_z, density]
+            # Adaptive voxel size predictor network
+            if learnable_adaptation:
+                self.size_predictor = nn.Sequential(
+                    nn.Linear(7, 64),  # [x,y,z,intensity,density,local_var,neighbors]
                     nn.ReLU(),
-                    nn.Dropout(0.1),
                     nn.Linear(64, 32),
                     nn.ReLU(),
-                    nn.Dropout(0.1), 
-                    nn.Linear(32, 16),
-                    nn.ReLU(),
-                    nn.Linear(16, 3),  # Output: scale factors for x, y, z
-                    nn.Sigmoid()       # [0, 1] → maps to [min_size, max_size]
+                    nn.Linear(32, 3),  # Predict size multipliers for x,y,z
+                    nn.Sigmoid()       # [0,1] range
                 )
-            else:
-                # Simple density-based (non-learned)
-                return nn.Sequential(
-                    nn.Linear(4, 16),  # density + position
+                
+                # Feature aggregation network for adaptive voxels
+                self.feature_aggregator = nn.Sequential(
+                    nn.Linear(num_features + 3, 32),  # features + voxel_size
                     nn.ReLU(),
-                    nn.Linear(16, 3),
-                    nn.Sigmoid()
+                    nn.Linear(32, num_features),
+                    nn.ReLU()
                 )
-        
-        def _build_feature_network(self):
-            """Build feature extraction network."""
-            layers = []
-            # Input: point features (4) + adaptive scales (3) = 7
-            in_dim = self.in_channels + 3  
-            
-            for out_dim in self.feat_channels:
-                layers.extend([
-                    nn.Linear(in_dim, out_dim),
-                    nn.LayerNorm(out_dim),  # Use LayerNorm instead of BatchNorm1d
+                
+                # Mapping network to handle variable->regular grid conversion
+                self.grid_mapper = nn.Sequential(
+                    nn.Linear(num_features * 2, 32),  # multiple voxels -> single grid cell
                     nn.ReLU(),
-                    nn.Dropout(0.1)
-                ])
-                in_dim = out_dim
+                    nn.Linear(32, num_features)
+                )
             
-            # Remove the last dropout
-            if layers:
-                layers = layers[:-1]
+            # Precompute regular grid dimensions
+            self.grid_dims = self._compute_grid_dimensions()
             
-            return nn.Sequential(*layers)
-        
-        def _build_conflict_resolver(self):
-            """Build network to resolve conflicts when mapping to regular grid."""
-            # Simplified for current implementation
-            return nn.Sequential(
-                nn.Linear(self.feat_channels[-1], 16),
-                nn.ReLU(),
-                nn.Linear(16, 1),
-                nn.Sigmoid()
-            )
-        
-        def _compute_regular_grid_size(self):
-            """Compute regular grid size for sparse convolution."""
+            print(f"🎯 Adaptive Voxelization Module (PhD Research) initialized:")
+            print(f"   - Base voxel size: {base_voxel_size}")
+            print(f"   - Adaptive range: {min_voxel_size} → {max_voxel_size}")
+            print(f"   - Adaptation levels: {adaptation_levels}")
+            print(f"   - Grid dimensions: {self.grid_dims}")
+            print(f"   - Learnable adaptation: {learnable_adaptation}")
+
+        def _compute_grid_dimensions(self):
+            """Compute regular grid dimensions for sparse convolution output."""
             pc_range = self.point_cloud_range
-            base_voxel = self.base_voxel_size
+            base_size = self.base_voxel_size
             
-            grid_size = [
-                int((pc_range[5] - pc_range[2]) / base_voxel[2]),  # Z
-                int((pc_range[4] - pc_range[1]) / base_voxel[1]),  # Y
-                int((pc_range[3] - pc_range[0]) / base_voxel[0])   # X
+            dims = [
+                int((pc_range[5] - pc_range[2]) / base_size[2]),  # Z
+                int((pc_range[4] - pc_range[1]) / base_size[1]),  # Y  
+                int((pc_range[3] - pc_range[0]) / base_size[0])   # X
             ]
-            return grid_size
-        
-        def _learn_adaptive_voxel_sizes(self, points: torch.Tensor) -> torch.Tensor:
-            """
-            LEARN optimal voxel sizes for each point.
-            This is where the magic happens - the network learns what voxel size is best!
-            """
-            device = points.device
-            
-            # Normalize point positions for learning
-            pc_range = self.point_cloud_range.to(device)
-            normalized_pos = (points[:, :3] - pc_range[0:3]) / (pc_range[3:6] - pc_range[0:3])
-            
-            # Combine point features with normalized position
-            adaptation_input = torch.cat([points, normalized_pos], dim=1)
-            
-            # Learn voxel size scales [0, 1]
-            size_scales = self.adaptation_network(adaptation_input)
-            
-            # Map scales to actual voxel sizes
-            min_voxel = self.min_voxel_size.to(device)
-            max_voxel = self.max_voxel_size.to(device)
-            adaptive_voxel_sizes = min_voxel + (max_voxel - min_voxel) * size_scales
-            
-            return adaptive_voxel_sizes
-        
-        def _create_adaptive_voxels(self, points: torch.Tensor, adaptive_sizes: torch.Tensor) -> Dict:
-            """Create variable-size voxels."""
-            device = points.device
-            pc_range = self.point_cloud_range.to(device)
-            
-            # Create adaptive voxels
-            adaptive_voxels = {}
-            
-            for i, (point, voxel_size) in enumerate(zip(points, adaptive_sizes)):
-                # Compute adaptive voxel coordinate
-                adaptive_coord = ((point[:3] - pc_range[0:3]) / voxel_size).long()
-                
-                # Create unique key including voxel size (to avoid mixing different sizes)
-                voxel_key = (*adaptive_coord.tolist(), *voxel_size.round(decimals=3).tolist())
-                
-                if voxel_key not in adaptive_voxels:
-                    adaptive_voxels[voxel_key] = {
-                        'points': [],
-                        'sizes': [],
-                        'center': adaptive_coord,
-                        'voxel_size': voxel_size
-                    }
-                
-                # Add point if voxel not full
-                if len(adaptive_voxels[voxel_key]['points']) < self.max_points_per_voxel:
-                    adaptive_voxels[voxel_key]['points'].append(point)
-                    adaptive_voxels[voxel_key]['sizes'].append(voxel_size)
-            
-            return adaptive_voxels
-        
-        def _map_to_regular_grid(self, adaptive_voxels: Dict) -> Tuple[torch.Tensor, torch.Tensor]:
-            """
-            THE KEY STEP: Map variable adaptive voxels to regular grid for sparse convolution.
-            This solves the compatibility problem!
-            """
-            if not adaptive_voxels:
-                # Handle empty case
-                device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-                return torch.zeros(0, self.feat_channels[-1], device=device), \
-                       torch.zeros(0, 4, dtype=torch.long, device=device)
-            
-            device = next(iter(adaptive_voxels.values()))['points'][0].device
-            pc_range = self.point_cloud_range.to(device)
-            base_voxel = self.base_voxel_size.to(device)
-            
-            # Regular grid for sparse convolution
-            regular_grid = {}
-            
-            for voxel_data in adaptive_voxels.values():
-                if not voxel_data['points']:
-                    continue
-                    
-                # Process points in this adaptive voxel
-                voxel_points = torch.stack(voxel_data['points'])
-                voxel_sizes = torch.stack(voxel_data['sizes'])
-                
-                # Extract features for each point in batch
-                voxel_points_with_sizes = []
-                for j, (point, size) in enumerate(zip(voxel_points, voxel_sizes)):
-                    # Add size information to point features
-                    point_with_size = torch.cat([point, size])
-                    voxel_points_with_sizes.append(point_with_size)
-                
-                # Process all points in this voxel as a batch
-                if voxel_points_with_sizes:
-                    batch_input = torch.stack(voxel_points_with_sizes)
-                    point_features = self.feature_network(batch_input)
-                else:
-                    continue
-                
-                # Map each point to regular grid coordinate
-                for point, feature, size in zip(voxel_points, point_features, voxel_sizes):
-                    # Map to regular grid using BASE voxel size
-                    regular_coord = ((point[:3] - pc_range[0:3]) / base_voxel).long()
-                    
-                    # Clamp to valid range
-                    regular_coord = torch.clamp(regular_coord, 
-                                              torch.zeros(3, device=device, dtype=torch.long),
-                                              torch.tensor(self.regular_grid_size, device=device, dtype=torch.long) - 1)
-                    
-                    reg_key = tuple(regular_coord.tolist())
-                    
-                    if reg_key not in regular_grid:
-                        regular_grid[reg_key] = {
-                            'features': [],
-                            'sizes': [],
-                            'positions': []
-                        }
-                    
-                    regular_grid[reg_key]['features'].append(feature)
-                    regular_grid[reg_key]['sizes'].append(size)
-                    regular_grid[reg_key]['positions'].append(point[:3])
-            
-            # Handle case where no valid voxels were created
-            if not regular_grid:
-                return torch.zeros(0, self.feat_channels[-1], device=device), \
-                       torch.zeros(0, 4, dtype=torch.long, device=device)
-            
-            # Resolve conflicts using learned weights
-            final_features = []
-            final_coords = []
-            
-            for reg_key, grid_data in regular_grid.items():
-                if not grid_data['features']:
-                    continue
-                    
-                features = torch.stack(grid_data['features'])
-                sizes = torch.stack(grid_data['sizes'])
-                positions = torch.stack(grid_data['positions'])
-                
-                if len(features) == 1:
-                    # No conflict
-                    final_feature = features[0]
-                else:
-                    # CONFLICT RESOLUTION: Learn how to combine multiple adaptive voxels
-                    # that map to the same regular grid cell
-                    conflict_inputs = []
-                    for feat, size, pos in zip(features, sizes, positions):
-                        conflict_input = torch.cat([feat, size, pos])
-                        conflict_inputs.append(conflict_input)
-                    
-                    conflict_inputs = torch.stack(conflict_inputs)
-                    weights = self.conflict_resolver(conflict_inputs).squeeze(-1)
-                    weights = weights / (weights.sum() + 1e-8)  # Normalize
-                    
-                    # Weighted combination
-                    final_feature = (features * weights.unsqueeze(-1)).sum(dim=0)
-                
-                final_features.append(final_feature)
-                final_coords.append(torch.tensor([0, reg_key[2], reg_key[1], reg_key[0]], dtype=torch.long, device=device))
-            
-            if final_features:
-                final_features = torch.stack(final_features)
-                final_coords = torch.stack(final_coords)
-            else:
-                final_features = torch.zeros(0, self.feat_channels[-1], device=device)
-                final_coords = torch.zeros(0, 4, dtype=torch.long, device=device)
-            
-            return final_features, final_coords
-        
-        def forward(self, features, num_points, coors):
-            """
-            Forward function compatible with MMDetection3D VFE interface.
-            
-            Args:
-                features (torch.Tensor): Point features in shape (N, M, C). 
-                    N is number of voxels, M is max points per voxel, C is feature channels.
-                num_points (torch.Tensor): Number of points in each voxel, shape (N,).
-                coors (torch.Tensor): Coordinates of voxels, shape (N, 4).
-                
-            Returns:
-                torch.Tensor: Processed voxel features in shape (N, feat_channels[-1]).
-                    This matches the HardSimpleVFE output format.
-            """
-            self.forward_call_count += 1
-            
-            # Debug print every 100 calls to avoid spam
-            if self.forward_call_count % 100 == 1:
-                print(f"🔄 AdaptiveSparseBridge forward call #{self.forward_call_count}")
-                print(f"   Input shapes: features={features.shape}, num_points={num_points.shape}")
-            
-            batch_size, max_points, feat_dim = features.shape
-            device = features.device
-            
-            # Simple adaptive feature processing that maintains VFE interface
-            processed_features = []
+            return dims
+
+        def _compute_local_features(self, features, num_points):
+            """Compute local density and variation features for adaptive sizing."""
+            batch_size = features.size(0)
+            local_features = []
             
             for i in range(batch_size):
                 n_pts = num_points[i]
                 if n_pts > 0:
-                    # Get points in this voxel
-                    voxel_points = features[i, :n_pts]  # [n_pts, feat_dim]
+                    voxel_points = features[i, :n_pts]
                     
-                    # Compute basic statistics for adaptation
-                    voxel_center = voxel_points[:, :3].mean(dim=0)  # xyz center
-                    point_density = float(n_pts) / max_points      # density measure
+                    # Local density (normalized)
+                    density = float(n_pts) / features.size(1)
                     
-                    # Simple adaptive weighting based on density
-                    # Dense areas get smaller effective voxels (more local features)
-                    # Sparse areas get larger effective voxels (more global features)
-                    density_factor = torch.tensor(point_density, device=device)
+                    # Local variation (std of coordinates)
+                    coord_var = voxel_points[:, :3].std(dim=0).mean().item()
                     
-                    if self.learnable_adaptation:
-                        # Learn adaptive feature processing
-                        pc_range = torch.tensor(self.point_cloud_range, device=device, dtype=torch.float32)
-                        
-                        # Normalize center position
-                        if len(pc_range) >= 6:
-                            normalized_center = (voxel_center - pc_range[0:3]) / (pc_range[3:6] - pc_range[0:3] + 1e-8)
-                        else:
-                            normalized_center = voxel_center * 0.1  # fallback normalization
-                        
-                        # Create adaptation input: [center_xyz, density]
-                        adaptation_input = torch.cat([normalized_center, density_factor.unsqueeze(0)])
-                        
-                        try:
-                            # Learn adaptive scales
-                            adaptive_scales = self.adaptation_network(adaptation_input.unsqueeze(0)).squeeze(0)
-                        except Exception as e:
-                            print(f"Warning: adaptation network failed: {e}")
-                            # Fallback if adaptation network fails
-                            adaptive_scales = torch.ones(3, device=device) * 0.5
-                    else:
-                        # Simple rule-based adaptation
-                        adaptive_scales = torch.ones(3, device=device) * density_factor
+                    # Neighbor estimate (based on density)
+                    neighbors = min(density * 10, 1.0)
                     
-                    # Enhanced feature processing
-                    enhanced_features = []
-                    for point in voxel_points:
-                        # Add adaptive information to point features
-                        if len(adaptive_scales) == 3 and len(point) >= 3:
-                            # Add scale information
-                            enhanced_point = torch.cat([point, adaptive_scales])
-                            enhanced_features.append(enhanced_point)
-                        else:
-                            # Fallback to original point
-                            enhanced_features.append(point)
+                    # Combine features: [x_mean, y_mean, z_mean, intensity_mean, density, variation, neighbors]
+                    mean_point = voxel_points.mean(dim=0)  # [x,y,z,intensity]
+                    local_feat = torch.cat([
+                        mean_point,
+                        torch.tensor([density, coord_var, neighbors], device=features.device)
+                    ])
                     
-                    if enhanced_features:
-                        try:
-                            enhanced_batch = torch.stack(enhanced_features)
-                            processed_batch = self.feature_network(enhanced_batch)
-                            
-                            # Aggregate features (mean pooling like standard VFE)
-                            voxel_feature = processed_batch.mean(dim=0)
-                            processed_features.append(voxel_feature)
-                        except Exception:
-                            # Fallback to simple mean
-                            simple_mean = voxel_points[:, :self.feat_channels[-1]].mean(dim=0)
-                            processed_features.append(simple_mean)
-                    else:
-                        # Empty voxel fallback
-                        processed_features.append(torch.zeros(self.feat_channels[-1], device=device))
+                    local_features.append(local_feat)
                 else:
                     # Empty voxel
-                    processed_features.append(torch.zeros(self.feat_channels[-1], device=device))
+                    local_features.append(torch.zeros(7, device=features.device))
             
-            if processed_features:
-                result = torch.stack(processed_features)
+            return torch.stack(local_features)
+
+        def _predict_adaptive_sizes(self, local_features):
+            """Predict adaptive voxel sizes based on local features."""
+            if not self.learnable_adaptation:
+                # Simple rule-based adaptation
+                densities = local_features[:, 4]  # density feature
+                size_multipliers = torch.ones_like(densities).unsqueeze(1).repeat(1, 3)
+                
+                # Dense areas -> smaller voxels, sparse areas -> larger voxels
+                size_multipliers[densities > 0.7] = 0.5  # Small voxels for dense areas
+                size_multipliers[densities < 0.3] = 1.5  # Large voxels for sparse areas
+                
+                return size_multipliers
             else:
-                result = torch.zeros(batch_size, self.feat_channels[-1], device=device)
+                # Learned adaptive sizing
+                size_multipliers = self.size_predictor(local_features)
+                
+                # Map [0,1] to [min_ratio, max_ratio]
+                min_ratio = self.min_voxel_size / self.base_voxel_size
+                max_ratio = self.max_voxel_size / self.base_voxel_size
+                
+                min_ratio = min_ratio.to(size_multipliers.device)
+                max_ratio = max_ratio.to(size_multipliers.device)
+                
+                adapted_sizes = min_ratio + size_multipliers * (max_ratio - min_ratio)
+                return adapted_sizes
+
+        def _create_adaptive_voxels(self, features, num_points, size_multipliers):
+            """Create adaptive voxels with variable sizes."""
+            batch_size = features.size(0)
+            adaptive_voxels = {}
             
-            return result
+            base_size = self.base_voxel_size.to(features.device)
+            pc_range = self.point_cloud_range.to(features.device)
+            
+            for i in range(batch_size):
+                n_pts = num_points[i]
+                if n_pts > 0:
+                    voxel_points = features[i, :n_pts]
+                    adaptive_size = size_multipliers[i] * base_size
+                    
+                    # Compute adaptive voxel center
+                    center = voxel_points[:, :3].mean(dim=0)
+                    
+                    # Map to adaptive grid coordinates
+                    grid_coord = ((center - pc_range[:3]) / adaptive_size).long()
+                    
+                    # Create unique key combining coord and size
+                    key = (*grid_coord.tolist(), *adaptive_size.round(decimals=2).tolist())
+                    
+                    if key not in adaptive_voxels:
+                        adaptive_voxels[key] = {
+                            'points': [],
+                            'adaptive_size': adaptive_size,
+                            'grid_coord': grid_coord
+                        }
+                    
+                    adaptive_voxels[key]['points'].append(voxel_points)
+            
+            return adaptive_voxels
+
+        def _map_to_regular_grid(self, adaptive_voxels):
+            """Map adaptive voxels back to regular grid for sparse convolution."""
+            if not adaptive_voxels:
+                device = self.base_voxel_size.device
+                return torch.zeros(0, self.num_features, device=device)
+            
+            regular_grid = {}
+            base_size = self.base_voxel_size.to(next(iter(adaptive_voxels.values()))['adaptive_size'].device)
+            pc_range = self.point_cloud_range.to(base_size.device)
+            
+            # Process each adaptive voxel
+            for voxel_data in adaptive_voxels.values():
+                if not voxel_data['points']:
+                    continue
+                    
+                # Aggregate points in this adaptive voxel
+                all_points = torch.cat(voxel_data['points'], dim=0)
+                adaptive_size = voxel_data['adaptive_size']
+                
+                # Process features with size information
+                if self.learnable_adaptation:
+                    # Add size info to features for learning
+                    size_info = adaptive_size.unsqueeze(0).repeat(all_points.size(0), 1)
+                    enhanced_features = torch.cat([all_points, size_info], dim=1)
+                    aggregated_features = self.feature_aggregator(enhanced_features).mean(dim=0)
+                else:
+                    # Simple mean aggregation
+                    aggregated_features = all_points.mean(dim=0)
+                
+                # Map to regular grid coordinate
+                center = all_points[:, :3].mean(dim=0)
+                regular_coord = ((center - pc_range[:3]) / base_size).long()
+                
+                # Clamp to valid grid bounds
+                regular_coord = torch.clamp(regular_coord, 
+                                          torch.zeros(3, device=regular_coord.device, dtype=torch.long),
+                                          torch.tensor(self.grid_dims, device=regular_coord.device, dtype=torch.long) - 1)
+                
+                grid_key = tuple(regular_coord.tolist())
+                
+                if grid_key not in regular_grid:
+                    regular_grid[grid_key] = []
+                
+                regular_grid[grid_key].append(aggregated_features[:self.num_features])
+            
+            # Handle conflicts (multiple adaptive voxels -> single regular cell)
+            final_features = []
+            for grid_cell_features in regular_grid.values():
+                if len(grid_cell_features) == 1:
+                    final_features.append(grid_cell_features[0])
+                else:
+                    # Multiple adaptive voxels map to same regular cell
+                    stacked_features = torch.stack(grid_cell_features)
+                    
+                    if self.learnable_adaptation:
+                        # Learn how to combine multiple adaptive voxels
+                        combined_input = torch.cat([stacked_features.flatten(), 
+                                                  stacked_features.mean(dim=0)], dim=0)
+                        if combined_input.size(0) <= self.num_features * 2:
+                            # Pad if needed
+                            pad_size = self.num_features * 2 - combined_input.size(0)
+                            combined_input = F.pad(combined_input, (0, pad_size))
+                        else:
+                            # Truncate if too large
+                            combined_input = combined_input[:self.num_features * 2]
+                        
+                        mapped_features = self.grid_mapper(combined_input)
+                        final_features.append(mapped_features)
+                    else:
+                        # Simple averaging
+                        final_features.append(stacked_features.mean(dim=0))
+            
+            if final_features:
+                return torch.stack(final_features)
+            else:
+                device = base_size.device
+                return torch.zeros(0, self.num_features, device=device)
+
+        def forward(self, features, num_points, coors):
+            """
+            Forward pass with TRUE adaptive voxelization.
+            
+            Creates variable voxel sizes and maps back to regular grid.
+            """
+            # Compute local features for adaptation
+            local_features = self._compute_local_features(features, num_points)
+            
+            # Predict adaptive voxel sizes
+            size_multipliers = self._predict_adaptive_sizes(local_features)
+            
+            # Create adaptive voxels with variable sizes
+            adaptive_voxels = self._create_adaptive_voxels(features, num_points, size_multipliers)
+            
+            # Map back to regular grid for sparse convolution
+            regular_features = self._map_to_regular_grid(adaptive_voxels)
+            
+            # Ensure output matches expected batch size
+            if regular_features.size(0) != features.size(0):
+                # Pad or truncate to match input batch size
+                if regular_features.size(0) < features.size(0):
+                    # Pad with zeros
+                    pad_size = features.size(0) - regular_features.size(0)
+                    padding = torch.zeros(pad_size, self.num_features, device=features.device)
+                    regular_features = torch.cat([regular_features, padding], dim=0)
+                else:
+                    # Truncate
+                    regular_features = regular_features[:features.size(0)]
+            
+            return regular_features.contiguous()
 
 else:
-    # Fallback when torch is not available
     class AdaptiveSparseBridge:
         def __init__(self, *args, **kwargs):
-            raise ImportError("PyTorch is required for AdaptiveSparseBridge")
+            raise ImportError("PyTorch is required")

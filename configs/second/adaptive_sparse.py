@@ -30,15 +30,13 @@ model = dict(
             max_voxels=(16000, 40000))),
     voxel_encoder=dict(
         type='AdaptiveSparseBridge',
-        base_voxel_size=voxel_size,  # Match the voxel layer
+        base_voxel_size=voxel_size,                  # [0.5, 0.5, 0.5] 
         point_cloud_range=point_cloud_range,
-        min_voxel_size=[0.25, 0.25, 0.25],        # Adaptive range around base size
-        max_voxel_size=[1.0, 1.0, 1.0],           # Adaptive range around base size
-        adaptation_method='learned',               # Learn voxel sizes
-        max_points_per_voxel=5,                   # Match voxel layer
-        in_channels=4,
-        feat_channels=[4],                        # Output 4 channels to match middle encoder
-        learnable_adaptation=True),               # Enable learning
+        min_voxel_size=[0.25, 0.25, 0.25],          # Fine detail voxels
+        max_voxel_size=[1.0, 1.0, 1.0],             # Coarse area voxels  
+        num_features=4,
+        adaptation_levels=3,                         # Number of size levels
+        learnable_adaptation=True),                  # Enable neural adaptation
     
     # Standard sparse convolution works with the bridge output
     bbox_head=dict(num_classes=1))
