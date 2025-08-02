@@ -13,7 +13,7 @@
 _base_ = [
     '../_base_/models/second_hv_secfpn_kitti.py',
     '../_base_/datasets/kitti-3d-car.py',
-    '../_base_/schedules/cyclic-2e.py', 
+    # Skip the problematic schedule - we'll define our own
     '../_base_/default_runtime.py'
 ]
 
@@ -27,10 +27,16 @@ point_cloud_range = [0, -39.68, -3, 69.12, 39.68, 1]
 model = dict(
     data_preprocessor=dict(
         type='Det3DDataPreprocessor',
-        voxel=False,  # We handle voxelization in our custom layer
+        voxel=True,  # Enable voxelization in preprocessor
+        voxel_layer=dict(
+            max_num_points=35,
+            max_voxels=(16000, 40000),
+            point_cloud_range=point_cloud_range,
+            voxel_size=[0.16, 0.16, 4.0],
+        )
     ),
     
-    # 🚀 YOUR RESEARCH: Learnable Adaptive Voxel Layer
+    # 🚀 YOUR RESEARCH: Learnable Adaptive Voxel Layer  
     voxel_encoder=dict(
         type='AdaptiveLearnableVoxelLayer',
         point_cloud_range=point_cloud_range,
@@ -41,7 +47,7 @@ model = dict(
         importance_threshold=0.5,
     ),
     
-    # 🔬 ADAPTIVE FEATURE PROCESSING
+    #  ADAPTIVE FEATURE PROCESSING
     middle_encoder=dict(
         type='AdaptiveVoxelEncoder',
         in_channels=4,  # Standard parameter name for MMDetection3D
@@ -68,8 +74,50 @@ model = dict(
     )
 )
 
+# 🎯 RESEARCH OPTIMIZER: Enable learning of voxel parameters
+optim_wrapper = dict(
+    type='OptimWrapper',
+    optimizer=dict(
+        type='AdamW', 
+        lr=0.001,  # Learning rate for adaptive voxel parameters
+        betas=(0.95, 0.99),
+        weight_decay=0.01
+    ),
+    clip_grad=dict(max_norm=35, norm_type=2)
+)
+
+# Override parameter scheduler for iteration-based training
+param_scheduler = [
+    dict(
+        type='LinearLR',
+        start_factor=0.1,
+        by_epoch=False,
+        begin=0,
+        end=2
+    ),
+    dict(
+        type='CosineAnnealingLR',
+        T_max=3,
+        by_epoch=False,
+        begin=2,
+        end=5
+    )
+]
+
+# Override log processor to be iteration-based
+log_processor = dict(by_epoch=False, type='LogProcessor', window_size=50)
+
 # 🔬 RESEARCH TRAINING: Quick testing to verify adaptive voxelization
-train_cfg = dict(max_iters=5, val_interval=10)  # Only 5 iterations for testing
+# Completely override the epoch-based training from the base config
+train_cfg = dict(
+    type='IterBasedTrainLoop',  # Use iteration-based training
+    max_iters=5,  # Only 5 iterations for testing
+    val_interval=10
+)
+
+# Override validation and test configurations
+val_cfg = dict(type='ValLoop')
+test_cfg = dict(type='TestLoop')
 
 # Optimized settings for research
 train_dataloader = dict(
@@ -83,17 +131,6 @@ val_dataloader = dict(
     batch_size=1,
     num_workers=1,
     persistent_workers=False
-)
-
-# 🎯 RESEARCH OPTIMIZER: Enable learning of voxel parameters
-optim_wrapper = dict(
-    type='OptimWrapper',
-    optimizer=dict(
-        type='AdamW', 
-        lr=0.001,  # Learning rate for adaptive voxel parameters
-        weight_decay=0.01
-    ),
-    clip_grad=dict(max_norm=35, norm_type=2)
 )
 
 # Fast logging for research iterations
