@@ -31,11 +31,13 @@ model = dict(
     voxel_encoder=dict(
         type='AdaptiveSparseBridge',
         num_features=4,
-        learnable_adaptation=False,        # Start with rule-based only
-        adaptation_strength=0.05,         # Ultra-conservative strength
-        use_attention=False,               # Disabled
-        multi_scale=False,                 # Disabled initially
-        warmup_epochs=3),                  # 3 epochs before any adaptation
+        base_voxel_size=0.5,              # Base reference size
+        min_voxel_size=0.1,               # Minimum learnable size
+        max_voxel_size=1.0,               # Maximum learnable size
+        learnable_voxel_dims=3,           # Learn x,y,z sizes independently
+        spatial_encoding_dim=64,          # Spatial feature encoding
+        voxel_predictor_hidden=128,       # Hidden dim for voxel predictor
+        grid_resolution=(140, 1600, 41)), # Target regular grid for middle layer
     
     # Standard sparse convolution works with the bridge output
     bbox_head=dict(num_classes=1))
