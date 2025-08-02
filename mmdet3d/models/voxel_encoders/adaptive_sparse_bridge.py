@@ -34,10 +34,11 @@ if TORCH_AVAILABLE:
         
         def __init__(self, 
                      num_features: int = 4,
-                     learnable_adaptation: bool = True,   
-                     adaptation_strength: float = 0.3,   # Reduced for stability
-                     use_attention: bool = False,         # Disable initially for stability
-                     multi_scale: bool = True,            
+                     learnable_adaptation: bool = False,  # Start disabled for stability
+                     adaptation_strength: float = 0.1,   # Very conservative
+                     use_attention: bool = False,         
+                     multi_scale: bool = False,           # Start disabled
+                     warmup_epochs: int = 5,              # Warmup before enabling adaptation
                      **kwargs):
             super().__init__()
             
@@ -46,142 +47,88 @@ if TORCH_AVAILABLE:
             self.adaptation_strength = adaptation_strength
             self.use_attention = use_attention
             self.multi_scale = multi_scale
+            self.warmup_epochs = warmup_epochs
             
-            # Simpler, more stable learnable components
+            # Training step counter for warmup
+            self.register_buffer('training_step', torch.tensor(0))
+            
+            # Only create learnable components if explicitly enabled
             if learnable_adaptation:
-                # Smaller, better initialized networks
-                self.adaptation_net = nn.Sequential(
-                    nn.Linear(num_features + 1, 8),   # Smaller hidden size
-                    nn.LayerNorm(8),                  # Layer norm for stability
-                    nn.ReLU(inplace=True),
-                    nn.Linear(8, num_features),
-                    nn.Sigmoid()
-                )
-                
-                # Initialize to near-identity
+                # Ultra-minimal learnable adaptation
+                self.adaptation_net = nn.Linear(1, 1)  # Just density -> scale
+                # Initialize to no-op
                 with torch.no_grad():
-                    self.adaptation_net[-2].weight.data *= 0.1  # Small weights
-                    self.adaptation_net[-2].bias.data.fill_(0.5)  # Start at 0.5 → sigmoid → ~0.6
-                
-                # Simpler density predictor
-                self.density_predictor = nn.Linear(1, 1)
-                # Initialize to identity
-                with torch.no_grad():
-                    self.density_predictor.weight.data.fill_(1.0)
-                    self.density_predictor.bias.data.fill_(0.0)
+                    self.adaptation_net.weight.data.fill_(0.0)  # Start with 0 effect
+                    self.adaptation_net.bias.data.fill_(1.0)    # Output = 1 (no change)
             
-            # Better initialized multi-scale aggregation
+            # Minimal multi-scale (only if enabled)
             if multi_scale:
-                self.fine_aggregator = nn.Linear(num_features, num_features)
-                self.coarse_aggregator = nn.Linear(num_features, num_features) 
+                self.scale_factor = nn.Parameter(torch.tensor(0.0))  # Learnable blend factor
                 
-                # Initialize close to identity
-                with torch.no_grad():
-                    nn.init.eye_(self.fine_aggregator.weight)
-                    nn.init.eye_(self.coarse_aggregator.weight)
-                    self.fine_aggregator.bias.data.fill_(0.0)
-                    self.coarse_aggregator.bias.data.fill_(0.0)
-                    
-                    # Fine aggregator slightly amplifies, coarse slightly reduces
-                    self.fine_aggregator.weight.data *= 1.1
-                    self.coarse_aggregator.weight.data *= 0.9
-            
-            # Remove problematic attention initially
-            if use_attention:
-                self.attention_layer = nn.MultiheadAttention(
-                    embed_dim=num_features, 
-                    num_heads=1, 
-                    batch_first=True,
-                    dropout=0.0  # No dropout initially
-                )
-            
-            print(f"🚀 Stable Adaptive Voxelization initialized:")
+            print(f"🎯 Minimal Adaptive Voxelization (Stability Focus):")
             print(f"   - Features: {num_features}")
             print(f"   - Learnable: {learnable_adaptation}")
-            print(f"   - Attention: {use_attention}")
             print(f"   - Multi-scale: {multi_scale}")
             print(f"   - Adaptation strength: {adaptation_strength}")
+            print(f"   - Warmup epochs: {warmup_epochs}")
+            print(f"   📋 Mode: Ultra-conservative for stable training")
 
         def forward(self, features, num_points, coors):
             """
-            Stable adaptive forward pass with careful gradient flow
+            Ultra-conservative adaptive forward pass
             
-            Key improvements for training stability:
-            1. Gradual adaptation that doesn't disrupt base performance
-            2. Proper residual connections
-            3. Stable scaling and normalization
-            4. Conservative feature transformations
+            Strategy: Start identical to HardSimpleVFE, gradually introduce adaptation
             """
-            batch_size = features.size(0)
-            
-            # Base aggregation (identical to HardSimpleVFE)
-            base_features = features[:, :, :self.num_features].sum(
+            # Standard HardSimpleVFE computation (identical to vanilla SECOND)
+            points_mean = features[:, :, :self.num_features].sum(
                 dim=1, keepdim=False) / num_points.type_as(features).view(-1, 1)
             
-            # Start with base features for stability
-            points_mean = base_features
-            
-            # Gentle adaptive processing 
-            if self.adaptation_strength > 0:
-                # Compute density safely
+            # Only apply adaptive features after warmup and if training
+            if (self.training and 
+                self.adaptation_strength > 0 and 
+                self.training_step > self.warmup_epochs * 1000):  # Assume ~1000 iters per epoch
+                
+                # Increment training step
+                self.training_step += 1
+                
+                # Ultra-minimal adaptive component
                 max_points = features.size(1)
-                density = num_points.float() / max_points  # [batch_size]
+                density = num_points.float() / max_points
                 
-                # Clamp density to avoid extreme values
-                density = torch.clamp(density, 0.1, 1.0)
+                # Simple rule-based adaptation (no learning initially)
+                if not self.learnable_adaptation:
+                    # Very gentle density-based scaling
+                    density_effect = 1.0 + self.adaptation_strength * 0.1 * (density - 0.5)
+                    density_effect = torch.clamp(density_effect, 0.95, 1.05)  # Very limited range
+                    
+                    # Apply with heavy residual connection
+                    adapted_features = points_mean * density_effect.unsqueeze(-1)
+                    points_mean = 0.98 * points_mean + 0.02 * adapted_features
                 
-                # Multi-scale aggregation (conservative blending)
-                if self.multi_scale:
-                    fine_features = self.fine_aggregator(base_features)
-                    coarse_features = self.coarse_aggregator(base_features)
-                    
-                    # Conservative density-based blending
-                    density_weight = torch.clamp(density.unsqueeze(-1), 0.2, 0.8)
-                    multiscale_features = density_weight * fine_features + (1 - density_weight) * coarse_features
-                    
-                    # Gentle residual connection
-                    points_mean = 0.8 * base_features + 0.2 * multiscale_features
-                
-                # Learnable adaptation (if enabled)
-                if self.learnable_adaptation:
-                    # Create stable input
-                    adaptation_input = torch.cat([points_mean, density.unsqueeze(-1)], dim=-1)
-                    
-                    # Get adaptive weights (sigmoid ensures [0,1])
-                    adaptive_weights = self.adaptation_net(adaptation_input)
-                    
-                    # Get density scaling (more conservative)
-                    density_scale = self.density_predictor(density.unsqueeze(-1)).squeeze(-1)
-                    density_scale = torch.clamp(density_scale, 0.8, 1.2)  # Limited range
-                    
-                    # Apply adaptations gently
-                    adapted_features = points_mean * adaptive_weights * density_scale.unsqueeze(-1)
-                    
-                    # Strong residual connection to maintain base performance
-                    points_mean = 0.9 * points_mean + 0.1 * adapted_features
-                
-                # Optional attention (disabled by default for stability)
-                if self.use_attention:
+                else:
+                    # Learnable adaptation (very minimal)
                     try:
-                        points_reshaped = points_mean.unsqueeze(1)
-                        attended_features, _ = self.attention_layer(
-                            points_reshaped, points_reshaped, points_reshaped
-                        )
-                        attended_features = attended_features.squeeze(1)
+                        adaptation_scale = self.adaptation_net(density.unsqueeze(-1)).squeeze(-1)
+                        adaptation_scale = torch.clamp(adaptation_scale, 0.9, 1.1)
                         
-                        # Very gentle attention integration
-                        points_mean = 0.95 * points_mean + 0.05 * attended_features
+                        adapted_features = points_mean * adaptation_scale.unsqueeze(-1)
+                        points_mean = 0.95 * points_mean + 0.05 * adapted_features
                     except:
-                        # If attention fails, continue without it
+                        # If adaptation fails, use base features
                         pass
                 
-                # Final safety: ensure features don't explode
-                feature_norm = torch.norm(points_mean, dim=-1, keepdim=True)
-                base_norm = torch.norm(base_features, dim=-1, keepdim=True)
-                
-                # If features grew too much, scale them back
-                scale_factor = torch.clamp(feature_norm / (base_norm + 1e-8), 0.5, 2.0)
-                points_mean = points_mean / scale_factor
+                # Multi-scale (if enabled)
+                if self.multi_scale:
+                    # Minimal effect from multi-scale
+                    scale_weight = torch.sigmoid(self.scale_factor) * 0.02  # Max 2% effect
+                    # Apply tiny multi-scale effect
+                    multiscale_effect = density.unsqueeze(-1) * scale_weight
+                    points_mean = points_mean + points_mean * multiscale_effect
+            
+            else:
+                # During warmup or eval: increment step but no adaptation
+                if self.training:
+                    self.training_step += 1
             
             return points_mean.contiguous()
 

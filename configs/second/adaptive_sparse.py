@@ -31,10 +31,11 @@ model = dict(
     voxel_encoder=dict(
         type='AdaptiveSparseBridge',
         num_features=4,
-        learnable_adaptation=True,         # Enable learning
-        adaptation_strength=0.3,          # Conservative strength for stability
-        use_attention=False,               # Disable attention initially
-        multi_scale=True),                 # Keep multi-scale processing
+        learnable_adaptation=False,        # Start with rule-based only
+        adaptation_strength=0.05,         # Ultra-conservative strength
+        use_attention=False,               # Disabled
+        multi_scale=False,                 # Disabled initially
+        warmup_epochs=3),                  # 3 epochs before any adaptation
     
     # Standard sparse convolution works with the bridge output
     bbox_head=dict(num_classes=1))
