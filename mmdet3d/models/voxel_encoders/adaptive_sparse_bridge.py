@@ -81,6 +81,9 @@ if TORCH_AVAILABLE:
             print(f"   - Regular grid size: {self.regular_grid_size}")
             print(f"   - Learning: {learnable_adaptation}")
             print(f"   - Output channels: {feat_channels[-1]}")
+            
+            # Add a counter for debugging
+            self.forward_call_count = 0
         
         def _build_adaptation_network(self):
             """Build network that LEARNS optimal voxel sizes."""
@@ -327,6 +330,13 @@ if TORCH_AVAILABLE:
                 torch.Tensor: Processed voxel features in shape (N, feat_channels[-1]).
                     This matches the HardSimpleVFE output format.
             """
+            self.forward_call_count += 1
+            
+            # Debug print every 100 calls to avoid spam
+            if self.forward_call_count % 100 == 1:
+                print(f"🔄 AdaptiveSparseBridge forward call #{self.forward_call_count}")
+                print(f"   Input shapes: features={features.shape}, num_points={num_points.shape}")
+            
             batch_size, max_points, feat_dim = features.shape
             device = features.device
             

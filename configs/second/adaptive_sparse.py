@@ -37,6 +37,6 @@ optim_wrapper = dict(optimizer=dict(type='AdamW', lr=0.001, weight_decay=0.01))
 
 # Ensure frequent logging
 default_hooks = dict(
-    logger=dict(type='LoggerHook', interval=10),  # Log every 10 iterations
+    logger=dict(type='LoggerHook', interval=10),  # Log every 10 iterations instead of 50
     checkpoint=dict(type='CheckpointHook', interval=1)  # Save every epoch
 )
