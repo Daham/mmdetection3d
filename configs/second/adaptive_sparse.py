@@ -30,19 +30,45 @@ model = dict(
             max_voxels=(16000, 40000))),
     voxel_encoder=dict(
         type='AdaptiveSparseBridge',
-        base_voxel_size=voxel_size,                  # [0.5, 0.5, 0.5] 
-        point_cloud_range=point_cloud_range,
-        min_voxel_size=[0.25, 0.25, 0.25],          # Fine detail voxels
-        max_voxel_size=[1.0, 1.0, 1.0],             # Coarse area voxels  
         num_features=4,
-        learnable_adaptation=True),                  # Efficient neural adaptation
+        learnable_adaptation=True,         # Enable learning
+        adaptation_strength=0.3,          # Conservative strength for stability
+        use_attention=False,               # Disable attention initially
+        multi_scale=True),                 # Keep multi-scale processing
     
     # Standard sparse convolution works with the bridge output
     bbox_head=dict(num_classes=1))
 
-# Training settings
+# Training settings optimized for adaptive voxelization
 train_cfg = dict(max_epochs=80, val_interval=10)
-optim_wrapper = dict(optimizer=dict(type='AdamW', lr=0.001, weight_decay=0.01))
+
+# Conservative optimizer settings for stable adaptive training
+optim_wrapper = dict(
+    optimizer=dict(
+        type='AdamW', 
+        lr=0.0008,              # Slightly lower learning rate for stability
+        weight_decay=0.01,
+        eps=1e-8                # Numerical stability
+    ),
+    clip_grad=dict(max_norm=10.0, norm_type=2)  # Gradient clipping for stability
+)
+
+# Learning rate schedule
+param_scheduler = [
+    dict(
+        type='LinearLR',
+        start_factor=1.0 / 3,
+        by_epoch=False,
+        begin=0,
+        end=500),
+    dict(
+        type='CosineAnnealingLR',
+        T_max=80,
+        eta_min=1e-5,
+        by_epoch=True,
+        begin=0,
+        end=80)
+]
 
 # Reasonable logging frequency
 default_hooks = dict(

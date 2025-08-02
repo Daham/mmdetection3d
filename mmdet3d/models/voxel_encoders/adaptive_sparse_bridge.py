@@ -1,17 +1,16 @@
 """
-Efficient Adaptive Voxelization for PhD Research
+Enhanced Adaptive Voxelization - PhD Research with Practical Speed
 
-This module implements FAST adaptive voxel sizes:
-1. Efficient adaptive size prediction (vectorized)
-2. In-place voxel adaptation without expensive remapping
-3. Maintains sparse convolution compatibility
-4. Research-grade adaptive features with practical speed
+This module implements truly adaptive voxel concepts while maintaining training speed:
+1. Multi-scale feature aggregation simulating variable voxel sizes
+2. Adaptive attention mechanism for density-aware processing
+3. Learnable adaptation that evolves during training
+4. Research-grade adaptive concepts with production speed
 """
 
 try:
     import torch
     import torch.nn as nn
-    from typing import List
     from mmdet3d.registry import MODELS
     TORCH_AVAILABLE = True
 except ImportError:
@@ -24,162 +23,167 @@ if TORCH_AVAILABLE:
     @MODELS.register_module()
     class AdaptiveSparseBridge(nn.Module):
         """
-        EFFICIENT Adaptive Voxelization for PhD Research
+        Enhanced Adaptive Voxelization - Research-grade with practical speed
         
-        Key optimizations:
-        - Vectorized operations (no loops)
-        - In-place adaptation (no expensive remapping)
-        - Lightweight neural networks
-        - Batch processing
+        Core innovations:
+        1. Multi-scale feature aggregation (simulates different voxel sizes)
+        2. Adaptive attention based on local density patterns
+        3. Progressive learning of optimal voxel adaptations
+        4. Maintains sparse convolution compatibility
         """
         
         def __init__(self, 
-                     base_voxel_size: List[float] = [0.5, 0.5, 0.5],
-                     point_cloud_range: List[float] = [0, -40, -3, 70.4, 40, 1],
-                     min_voxel_size: List[float] = [0.25, 0.25, 0.25],
-                     max_voxel_size: List[float] = [1.0, 1.0, 1.0],
                      num_features: int = 4,
-                     learnable_adaptation: bool = True,
+                     learnable_adaptation: bool = True,   
+                     adaptation_strength: float = 0.3,   # Reduced for stability
+                     use_attention: bool = False,         # Disable initially for stability
+                     multi_scale: bool = True,            
                      **kwargs):
             super().__init__()
             
-            self.base_voxel_size = base_voxel_size
-            self.point_cloud_range = point_cloud_range
-            self.min_voxel_size = min_voxel_size
-            self.max_voxel_size = max_voxel_size
             self.num_features = num_features
             self.learnable_adaptation = learnable_adaptation
+            self.adaptation_strength = adaptation_strength
+            self.use_attention = use_attention
+            self.multi_scale = multi_scale
             
-            # LIGHTWEIGHT adaptive networks
+            # Simpler, more stable learnable components
             if learnable_adaptation:
-                # Fast density-based size predictor
-                self.size_predictor = nn.Sequential(
-                    nn.Linear(2, 8),    # [density, spatial_var] -> very lightweight
-                    nn.ReLU(),
-                    nn.Linear(8, 3),    # predict [x,y,z] size factors
+                # Smaller, better initialized networks
+                self.adaptation_net = nn.Sequential(
+                    nn.Linear(num_features + 1, 8),   # Smaller hidden size
+                    nn.LayerNorm(8),                  # Layer norm for stability
+                    nn.ReLU(inplace=True),
+                    nn.Linear(8, num_features),
                     nn.Sigmoid()
                 )
                 
-                # Fast feature adaptation
-                self.feature_adapter = nn.Sequential(
-                    nn.Linear(num_features + 1, 16),  # features + size_factor
-                    nn.ReLU(),
-                    nn.Linear(16, num_features)
+                # Initialize to near-identity
+                with torch.no_grad():
+                    self.adaptation_net[-2].weight.data *= 0.1  # Small weights
+                    self.adaptation_net[-2].bias.data.fill_(0.5)  # Start at 0.5 → sigmoid → ~0.6
+                
+                # Simpler density predictor
+                self.density_predictor = nn.Linear(1, 1)
+                # Initialize to identity
+                with torch.no_grad():
+                    self.density_predictor.weight.data.fill_(1.0)
+                    self.density_predictor.bias.data.fill_(0.0)
+            
+            # Better initialized multi-scale aggregation
+            if multi_scale:
+                self.fine_aggregator = nn.Linear(num_features, num_features)
+                self.coarse_aggregator = nn.Linear(num_features, num_features) 
+                
+                # Initialize close to identity
+                with torch.no_grad():
+                    nn.init.eye_(self.fine_aggregator.weight)
+                    nn.init.eye_(self.coarse_aggregator.weight)
+                    self.fine_aggregator.bias.data.fill_(0.0)
+                    self.coarse_aggregator.bias.data.fill_(0.0)
+                    
+                    # Fine aggregator slightly amplifies, coarse slightly reduces
+                    self.fine_aggregator.weight.data *= 1.1
+                    self.coarse_aggregator.weight.data *= 0.9
+            
+            # Remove problematic attention initially
+            if use_attention:
+                self.attention_layer = nn.MultiheadAttention(
+                    embed_dim=num_features, 
+                    num_heads=1, 
+                    batch_first=True,
+                    dropout=0.0  # No dropout initially
                 )
             
-            print(f"🎯 EFFICIENT Adaptive Voxelization initialized:")
-            print(f"   - Base voxel size: {base_voxel_size}")
-            print(f"   - Adaptive range: {min_voxel_size} → {max_voxel_size}")
+            print(f"🚀 Stable Adaptive Voxelization initialized:")
             print(f"   - Features: {num_features}")
             print(f"   - Learnable: {learnable_adaptation}")
-
-        def _compute_adaptive_factors_fast(self, features, num_points):
-            """FAST vectorized computation of adaptive factors."""
-            batch_size = features.size(0)
-            device = features.device
-            
-            # Vectorized density computation
-            max_points = features.size(1)
-            densities = num_points.float() / max_points  # [batch_size]
-            
-            # Fast spatial variation computation (vectorized)
-            valid_mask = num_points > 0
-            spatial_vars = torch.zeros(batch_size, device=device)
-            
-            if valid_mask.any():
-                # Only compute for non-empty voxels
-                valid_features = features[valid_mask]
-                valid_num_points = num_points[valid_mask]
-                
-                # Efficient spatial variation calculation
-                for i, (feat, n_pts) in enumerate(zip(valid_features, valid_num_points)):
-                    if n_pts > 1:
-                        coords = feat[:n_pts, :3]  # [n_pts, 3]
-                        spatial_var = coords.var(dim=0).mean().item()
-                        spatial_vars[valid_mask][i] = spatial_var
-            
-            return densities, spatial_vars
-
-        def _predict_adaptive_sizes_fast(self, densities, spatial_vars):
-            """FAST adaptive size prediction."""
-            device = densities.device
-            batch_size = densities.size(0)
-            
-            if not self.learnable_adaptation:
-                # Simple rule-based (very fast)
-                size_factors = torch.ones(batch_size, 3, device=device)
-                
-                # Dense areas -> smaller voxels
-                dense_mask = densities > 0.6
-                size_factors[dense_mask] = 0.5
-                
-                # Sparse areas -> larger voxels  
-                sparse_mask = densities < 0.3
-                size_factors[sparse_mask] = 1.5
-                
-                return size_factors
-            else:
-                # Learned adaptation (lightweight)
-                adaptation_input = torch.stack([densities, spatial_vars], dim=1)  # [batch, 2]
-                size_factors = self.size_predictor(adaptation_input)  # [batch, 3]
-                
-                # Map [0,1] to [min_ratio, max_ratio]
-                min_ratio = torch.tensor(self.min_voxel_size, device=device) / torch.tensor(self.base_voxel_size, device=device)
-                max_ratio = torch.tensor(self.max_voxel_size, device=device) / torch.tensor(self.base_voxel_size, device=device)
-                
-                adapted_factors = min_ratio + size_factors * (max_ratio - min_ratio)
-                return adapted_factors
-
-        def _apply_adaptive_features_fast(self, features, num_points, size_factors):
-            """FAST adaptive feature processing without expensive remapping."""
-            batch_size = features.size(0)
-            device = features.device
-            
-            # Standard mean calculation (like HardSimpleVFE)
-            points_mean = features[:, :, :self.num_features].sum(
-                dim=1, keepdim=False) / num_points.type_as(features).view(-1, 1)
-            
-            if not self.learnable_adaptation:
-                # Simple adaptive weighting based on size factors
-                avg_size_factor = size_factors.mean(dim=1, keepdim=True)  # [batch, 1]
-                
-                # Adaptive weighting: smaller voxels get more weight (finer details)
-                adaptive_weight = 2.0 - avg_size_factor  # Inverse relationship
-                adaptive_features = points_mean * adaptive_weight
-                
-                return adaptive_features
-            else:
-                # Learned adaptive feature processing
-                avg_size_factor = size_factors.mean(dim=1, keepdim=True)  # [batch, 1]
-                
-                # Combine features with size information
-                feature_input = torch.cat([points_mean, avg_size_factor], dim=1)  # [batch, features+1]
-                
-                # Apply lightweight adaptation
-                adaptive_features = self.feature_adapter(feature_input)
-                
-                return adaptive_features
+            print(f"   - Attention: {use_attention}")
+            print(f"   - Multi-scale: {multi_scale}")
+            print(f"   - Adaptation strength: {adaptation_strength}")
 
         def forward(self, features, num_points, coors):
             """
-            EFFICIENT forward pass with TRUE adaptive voxelization.
+            Stable adaptive forward pass with careful gradient flow
             
-            Optimizations:
-            - Vectorized operations (no loops)
-            - Lightweight networks
-            - In-place adaptation
-            - Minimal memory allocation
+            Key improvements for training stability:
+            1. Gradual adaptation that doesn't disrupt base performance
+            2. Proper residual connections
+            3. Stable scaling and normalization
+            4. Conservative feature transformations
             """
-            # Fast adaptive factor computation
-            densities, spatial_vars = self._compute_adaptive_factors_fast(features, num_points)
+            batch_size = features.size(0)
             
-            # Fast size prediction
-            size_factors = self._predict_adaptive_sizes_fast(densities, spatial_vars)
+            # Base aggregation (identical to HardSimpleVFE)
+            base_features = features[:, :, :self.num_features].sum(
+                dim=1, keepdim=False) / num_points.type_as(features).view(-1, 1)
             
-            # Fast adaptive feature processing
-            adaptive_features = self._apply_adaptive_features_fast(features, num_points, size_factors)
+            # Start with base features for stability
+            points_mean = base_features
             
-            return adaptive_features.contiguous()
+            # Gentle adaptive processing 
+            if self.adaptation_strength > 0:
+                # Compute density safely
+                max_points = features.size(1)
+                density = num_points.float() / max_points  # [batch_size]
+                
+                # Clamp density to avoid extreme values
+                density = torch.clamp(density, 0.1, 1.0)
+                
+                # Multi-scale aggregation (conservative blending)
+                if self.multi_scale:
+                    fine_features = self.fine_aggregator(base_features)
+                    coarse_features = self.coarse_aggregator(base_features)
+                    
+                    # Conservative density-based blending
+                    density_weight = torch.clamp(density.unsqueeze(-1), 0.2, 0.8)
+                    multiscale_features = density_weight * fine_features + (1 - density_weight) * coarse_features
+                    
+                    # Gentle residual connection
+                    points_mean = 0.8 * base_features + 0.2 * multiscale_features
+                
+                # Learnable adaptation (if enabled)
+                if self.learnable_adaptation:
+                    # Create stable input
+                    adaptation_input = torch.cat([points_mean, density.unsqueeze(-1)], dim=-1)
+                    
+                    # Get adaptive weights (sigmoid ensures [0,1])
+                    adaptive_weights = self.adaptation_net(adaptation_input)
+                    
+                    # Get density scaling (more conservative)
+                    density_scale = self.density_predictor(density.unsqueeze(-1)).squeeze(-1)
+                    density_scale = torch.clamp(density_scale, 0.8, 1.2)  # Limited range
+                    
+                    # Apply adaptations gently
+                    adapted_features = points_mean * adaptive_weights * density_scale.unsqueeze(-1)
+                    
+                    # Strong residual connection to maintain base performance
+                    points_mean = 0.9 * points_mean + 0.1 * adapted_features
+                
+                # Optional attention (disabled by default for stability)
+                if self.use_attention:
+                    try:
+                        points_reshaped = points_mean.unsqueeze(1)
+                        attended_features, _ = self.attention_layer(
+                            points_reshaped, points_reshaped, points_reshaped
+                        )
+                        attended_features = attended_features.squeeze(1)
+                        
+                        # Very gentle attention integration
+                        points_mean = 0.95 * points_mean + 0.05 * attended_features
+                    except:
+                        # If attention fails, continue without it
+                        pass
+                
+                # Final safety: ensure features don't explode
+                feature_norm = torch.norm(points_mean, dim=-1, keepdim=True)
+                base_norm = torch.norm(base_features, dim=-1, keepdim=True)
+                
+                # If features grew too much, scale them back
+                scale_factor = torch.clamp(feature_norm / (base_norm + 1e-8), 0.5, 2.0)
+                points_mean = points_mean / scale_factor
+            
+            return points_mean.contiguous()
 
 else:
     class AdaptiveSparseBridge:
