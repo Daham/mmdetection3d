@@ -42,12 +42,12 @@ if TORCH_AVAILABLE:
         """
         
         def __init__(self,
-                     base_voxel_size: List[float] = [0.05, 0.05, 0.1],
+                     base_voxel_size: List[float] = [0.5, 0.5, 0.5],       # Match vanilla SECOND
                      point_cloud_range: List[float] = [0, -40, -3, 70.4, 40, 1],
-                     min_voxel_size: List[float] = [0.025, 0.025, 0.05],    # Finest voxels
-                     max_voxel_size: List[float] = [0.2, 0.2, 0.4],         # Coarsest voxels
+                     min_voxel_size: List[float] = [0.25, 0.25, 0.25],     # Adaptive range
+                     max_voxel_size: List[float] = [1.0, 1.0, 1.0],        # Adaptive range
                      adaptation_method: str = 'learned',                    # How to adapt sizes
-                     max_points_per_voxel: int = 32,
+                     max_points_per_voxel: int = 5,                         # Match vanilla SECOND
                      in_channels: int = 4,
                      feat_channels: List[int] = [64],
                      learnable_adaptation: bool = True):                    # Enable learning
@@ -77,10 +77,12 @@ if TORCH_AVAILABLE:
             self.regular_grid_size = self._compute_regular_grid_size()
             
             print(f"🎯 AdaptiveSparseBridge initialized:")
-            print(f"   - Voxel size range: {min_voxel_size} → {max_voxel_size}")
+            print(f"   - Base voxel size: {base_voxel_size} (matches vanilla SECOND)")
+            print(f"   - Adaptive range: {min_voxel_size} → {max_voxel_size}")
             print(f"   - Regular grid size: {self.regular_grid_size}")
             print(f"   - Learning: {learnable_adaptation}")
             print(f"   - Output channels: {feat_channels[-1]}")
+            print(f"   - Max points per voxel: {max_points_per_voxel}")
             
             # Add a counter for debugging
             self.forward_call_count = 0

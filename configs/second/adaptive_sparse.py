@@ -8,6 +8,10 @@ _base_ = [
     '../_base_/default_runtime.py'
 ]
 
+# Use SAME voxel sizes as vanilla SECOND for fair comparison
+voxel_size = [0.5, 0.5, 0.5]  # Same as vanilla SECOND
+point_cloud_range = [0, -40, -3, 70.4, 40, 1]
+
 # No custom imports needed - module is registered automatically
 
 # This bridge:
@@ -16,17 +20,25 @@ _base_ = [
 # 3. Handles the compatibility automatically
 
 model = dict(
+    data_preprocessor=dict(
+        type='Det3DDataPreprocessor',
+        voxel=True,
+        voxel_layer=dict(
+            max_num_points=5,
+            point_cloud_range=point_cloud_range,
+            voxel_size=voxel_size,  # Use correct voxel size
+            max_voxels=(16000, 40000))),
     voxel_encoder=dict(
         type='AdaptiveSparseBridge',
-        base_voxel_size=[0.05, 0.05, 0.1],          # Regular grid base size
-        point_cloud_range=[0, -40, -3, 70.4, 40, 1],
-        min_voxel_size=[0.025, 0.025, 0.05],        # Smallest adaptive voxel
-        max_voxel_size=[0.2, 0.2, 0.4],             # Largest adaptive voxel  
-        adaptation_method='learned',                 # Learn voxel sizes
-        max_points_per_voxel=32,
+        base_voxel_size=voxel_size,  # Match the voxel layer
+        point_cloud_range=point_cloud_range,
+        min_voxel_size=[0.25, 0.25, 0.25],        # Adaptive range around base size
+        max_voxel_size=[1.0, 1.0, 1.0],           # Adaptive range around base size
+        adaptation_method='learned',               # Learn voxel sizes
+        max_points_per_voxel=5,                   # Match voxel layer
         in_channels=4,
-        feat_channels=[4],                           # Output 4 channels to match middle encoder
-        learnable_adaptation=True),                  # Enable learning
+        feat_channels=[4],                        # Output 4 channels to match middle encoder
+        learnable_adaptation=True),               # Enable learning
     
     # Standard sparse convolution works with the bridge output
     bbox_head=dict(num_classes=1))
@@ -35,8 +47,8 @@ model = dict(
 train_cfg = dict(max_epochs=80, val_interval=10)
 optim_wrapper = dict(optimizer=dict(type='AdamW', lr=0.001, weight_decay=0.01))
 
-# Ensure frequent logging
+# Reasonable logging frequency
 default_hooks = dict(
-    logger=dict(type='LoggerHook', interval=10),  # Log every 10 iterations instead of 50
-    checkpoint=dict(type='CheckpointHook', interval=1)  # Save every epoch
+    logger=dict(type='LoggerHook', interval=50),  # Every 50 iterations like standard
+    checkpoint=dict(type='CheckpointHook', interval=1)
 )
