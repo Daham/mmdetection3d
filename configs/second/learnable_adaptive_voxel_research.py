@@ -44,8 +44,8 @@ model = dict(
     # 🔬 ADAPTIVE FEATURE PROCESSING
     middle_encoder=dict(
         type='AdaptiveVoxelEncoder',
-        num_features=4,
-        out_features=128,
+        in_channels=4,  # Standard parameter name for MMDetection3D
+        out_channels=128,  # Use out_channels instead of out_features
     ),
     
     # Standard SECOND backbone for convolutional processing

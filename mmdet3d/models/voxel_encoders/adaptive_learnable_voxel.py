@@ -236,17 +236,22 @@ class AdaptiveVoxelEncoder(BaseModule):
     def __init__(self, 
                  num_features: int = 4,
                  out_features: int = 64,
-                 init_cfg=None):
+                 in_channels: int = None,  # Accept in_channels parameter
+                 out_channels: int = None,  # Accept out_channels parameter
+                 init_cfg=None,
+                 **kwargs):  # Accept any additional parameters
         super().__init__(init_cfg)
         
-        self.num_features = num_features
-        self.out_features = out_features
+        # Use in_channels if provided, otherwise use num_features
+        self.num_features = in_channels if in_channels is not None else num_features
+        # Use out_channels if provided, otherwise use out_features
+        self.out_features = out_channels if out_channels is not None else out_features
         
         # Simple feature aggregation
         self.feature_net = nn.Sequential(
-            nn.Linear(num_features, 32),
+            nn.Linear(self.num_features, 32),
             nn.ReLU(),
-            nn.Linear(32, out_features)
+            nn.Linear(32, self.out_features)
         )
         
     def forward(self, voxels: torch.Tensor, num_points: torch.Tensor) -> torch.Tensor:
