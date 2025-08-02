@@ -329,6 +329,7 @@ param_scheduler = [
 # RUNTIME CONFIGURATION
 # =============================================================================
 default_scope = 'mmdet3d'
+work_dir = './work_dirs/adaptive_multiscale'  # Working directory for outputs
 default_hooks = dict(
     timer=dict(type='IterTimerHook'),
     logger=dict(type='LoggerHook', interval=50),
