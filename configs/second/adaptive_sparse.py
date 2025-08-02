@@ -34,3 +34,9 @@ model = dict(
 # Training settings
 train_cfg = dict(max_epochs=80, val_interval=10)
 optim_wrapper = dict(optimizer=dict(type='AdamW', lr=0.001, weight_decay=0.01))
+
+# Ensure frequent logging
+default_hooks = dict(
+    logger=dict(type='LoggerHook', interval=10),  # Log every 10 iterations
+    checkpoint=dict(type='CheckpointHook', interval=1)  # Save every epoch
+)
