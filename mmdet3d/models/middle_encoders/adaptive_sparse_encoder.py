@@ -21,14 +21,13 @@ from mmcv.cnn import build_conv_layer, build_norm_layer
 from mmengine.model import BaseModule
 from typing import Dict, List, Tuple, Optional
 
-try:
-    import spconv.pytorch as spconv
-    from spconv.pytorch import SparseConvTensor
-except ImportError:
-    spconv = None
-    SparseConvTensor = None
-
+from mmdet3d.models.layers.spconv import IS_SPCONV2_AVAILABLE
 from mmdet3d.registry import MODELS
+
+if IS_SPCONV2_AVAILABLE:
+    from spconv.pytorch import SparseConvTensor, SparseSequential, SubMConv3d
+else:
+    from mmcv.ops import SparseConvTensor, SparseSequential, SubMConv3d
 
 
 @MODELS.register_module()
@@ -72,8 +71,7 @@ class AdaptiveSparseEncoder(BaseModule):
         
         super().__init__(**kwargs)
         
-        if spconv is None:
-            raise ImportError("spconv is required for AdaptiveSparseEncoder")
+        # No need to check spconv availability - handled by compatibility layer
         
         self.sparse_shape = sparse_shape
         self.in_channels = in_channels
@@ -123,7 +121,7 @@ class AdaptiveSparseEncoder(BaseModule):
         
         for i, (out_ch, padding) in enumerate(zip(self.encoder_channels, self.encoder_paddings)):
             # Sparse convolution layer
-            conv = spconv.SubMConv3d(
+            conv = SubMConv3d(
                 in_ch, out_ch,
                 kernel_size=3,
                 padding=padding,
@@ -142,7 +140,7 @@ class AdaptiveSparseEncoder(BaseModule):
             
             # Create block
             if self.block_type == 'conv_module':
-                block = spconv.SparseSequential(conv, norm, act)
+                block = SparseSequential(conv, norm, act)
             else:
                 block = conv
             
@@ -150,7 +148,7 @@ class AdaptiveSparseEncoder(BaseModule):
             in_ch = out_ch
         
         # Final output projection for this pathway
-        final_conv = spconv.SubMConv3d(
+        final_conv = SubMConv3d(
             in_ch, self.output_channels,
             kernel_size=1,
             bias=False,
@@ -158,7 +156,7 @@ class AdaptiveSparseEncoder(BaseModule):
         )
         layers.append(final_conv)
         
-        return spconv.SparseSequential(*layers)
+        return SparseSequential(*layers)
     
     def _build_fusion_module(self):
         """
