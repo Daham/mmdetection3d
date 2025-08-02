@@ -1,5 +1,5 @@
 """
-Adaptive Voxelization Research Configuration
+Adaptive Voxelization Research Configuration (Clean Version)
 
 This config implements learnable adaptive voxelization using the standard
 MMDetection3D base config pattern for clarity and maintainability.
@@ -86,7 +86,7 @@ optim_wrapper = dict(
 )
 
 # Working directory
-work_dir = './work_dirs/adaptive_multiscale'
+work_dir = './work_dirs/adaptive_multiscale_clean'
 
 print("🚗 Clean Adaptive Voxelization Config Loaded")
 print("🔬 Research Features: Learnable voxel sizes + Multi-scale processing")
