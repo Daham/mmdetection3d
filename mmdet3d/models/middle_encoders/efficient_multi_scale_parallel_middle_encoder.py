@@ -54,6 +54,11 @@ class EfficientMultiScaleParallelMiddleEncoder(BaseModule):
         print(f"📊 in_channels: {in_channels}, output_channels: {output_channels}")
         print("⚡ Using EFFICIENT vectorized operations for maximum performance")
         
+        # 🚀 ENHANCEMENT: Add projection layer for scale ID handling
+        # Handle input features with scale ID: (N, 65) → (N, 64)
+        self.scale_projection = nn.Linear(65, 64)
+        print("🔧 Added scale ID projection layer: 65 → 64 channels")
+        
         self.in_channels = in_channels
         self.output_channels = output_channels
         self.sparse_shape = sparse_shape
@@ -176,7 +181,7 @@ class EfficientMultiScaleParallelMiddleEncoder(BaseModule):
         Forward pass with efficient multi-scale parallel processing
         
         Args:
-            voxel_features: Voxel features from encoder [N, C]
+            voxel_features: Voxel features from encoder [N, 65] (64 features + 1 scale ID)
             coors: Voxel coordinates [N, 3] or [N, 4]  
             batch_size: Batch size
             
@@ -184,6 +189,11 @@ class EfficientMultiScaleParallelMiddleEncoder(BaseModule):
             Multi-scale fused BEV features [B, output_channels, H, W]
         """
         device = voxel_features.device
+        
+        # 🚀 ENHANCEMENT: Project features from 65 to 64 dimensions
+        # Handle scale ID dimension: (N, 65) → (N, 64)
+        if voxel_features.shape[1] == 65:
+            voxel_features = self.scale_projection(voxel_features)
         
         # 🔥 INTELLIGENT multi-scale assignment based on feature importance
         # Compute feature importance for proper scale assignment

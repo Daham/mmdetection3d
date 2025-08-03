@@ -8,6 +8,7 @@ from .multi_scale_parallel_middle_encoder import MultiScaleParallelMiddleEncoder
 # from .optimized_multi_scale_parallel_middle_encoder import OptimizedMultiScaleParallelMiddleEncoder
 from .fallback_multi_scale_parallel_middle_encoder import FallbackMultiScaleParallelMiddleEncoder
 from .efficient_multi_scale_parallel_middle_encoder import EfficientMultiScaleParallelMiddleEncoder
+from .enhanced_multi_scale_parallel_middle_encoder import EnhancedMultiScaleParallelMiddleEncoder
 
 __all__ = [
     'PointPillarsScatter', 'SparseEncoder', 'SparseEncoderSASSD',
@@ -15,4 +16,5 @@ __all__ = [
     # 'OptimizedMultiScaleParallelMiddleEncoder'  # Temporarily disabled
     'FallbackMultiScaleParallelMiddleEncoder',  # Spconv-free fallback solution
     'EfficientMultiScaleParallelMiddleEncoder',  # High-performance vectorized solution
+    'EnhancedMultiScaleParallelMiddleEncoder',  # For advanced multi-scale VFE with attention
 ]

@@ -218,16 +218,24 @@ class OptimizedMultiScaleAdaptiveVoxelEncoder(nn.Module):
         all_features = []
         all_coords = []
         
-        # Collect features from all active scales
+        # Collect features from all active scales with scale IDs
+        scale_id = 0  # fine = 0
         for scale_key in ['fine_features', 'medium_features', 'coarse_features']:
             if scale_key in multi_scale_data:
-                all_features.append(multi_scale_data[scale_key])
+                features = multi_scale_data[scale_key]
+                # 🚀 ENHANCEMENT: Add scale ID as additional feature dimension
+                scale_ids = torch.full((features.shape[0], 1), scale_id, 
+                                     dtype=features.dtype, device=features.device)
+                features_with_scale = torch.cat([features, scale_ids], dim=1)  # [N, 65]
+                
+                all_features.append(features_with_scale)
                 coords_key = scale_key.replace('features', 'coords')
                 all_coords.append(multi_scale_data[coords_key])
+            scale_id += 1  # medium = 1, coarse = 2
         
         if all_features:
             # Concatenate all features and coordinates
-            combined_features = torch.cat(all_features, dim=0)
+            combined_features = torch.cat(all_features, dim=0)  # [N, 65] now includes scale ID
             combined_coords = torch.cat(all_coords, dim=0)
             
             # Return expected format for VoxelNet compatibility
@@ -235,7 +243,7 @@ class OptimizedMultiScaleAdaptiveVoxelEncoder(nn.Module):
         else:
             # Fallback: return empty tensors in expected format
             device = points.device
-            empty_features = torch.zeros((0, 64), device=device)
+            empty_features = torch.zeros((0, 65), device=device)  # Updated to 65 for scale ID
             empty_coords = torch.zeros((0, 4), device=device)
             return empty_features, empty_coords
 

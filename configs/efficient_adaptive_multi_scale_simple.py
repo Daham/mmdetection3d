@@ -118,7 +118,7 @@ model = dict(
     data_preprocessor=dict(
         type='Det3DDataPreprocessor', voxel=False, voxel_layer=None),
     middle_encoder=dict(
-        in_channels=64,
+        in_channels=64,  # Will handle 65→64 projection internally for scale ID
         order=(
             'conv',
             'norm',
