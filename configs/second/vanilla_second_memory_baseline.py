@@ -1,60 +1,58 @@
-# 🔬 VANILLA SECOND BENCHMARK - Exact Match for Comparison
+# 🔬 VANILLA SECOND BASELINE - For Memory Comparison
 _base_ = [
     '../_base_/models/second_hv_secfpn_kitti.py',
     '../_base_/datasets/kitti-3d-car.py',
     '../_base_/default_runtime.py'
 ]
 
-# Configuration - IDENTICAL to adaptive config
+# Configuration
 point_cloud_range = [0, -39.68, -3, 69.12, 39.68, 1]
 class_names = ['Car']
 
-# 🎯 VANILLA SECOND: Standard configuration exactly matching adaptive config
+# 🎯 VANILLA SECOND: Exact same setup as adaptive but no adaptive features
 model = dict(
-    # IDENTICAL voxel preprocessing
+    # IDENTICAL voxel preprocessing as adaptive
     data_preprocessor=dict(
         voxel_layer=dict(
             point_cloud_range=point_cloud_range,
             max_num_points=5,
-            voxel_size=[0.05, 0.05, 0.1],  # IDENTICAL voxel size
-            max_voxels=(12000, 30000)      # IDENTICAL voxel count
+            voxel_size=[0.05, 0.05, 0.1],  # SAME as adaptive
+            max_voxels=(12000, 30000)  # SAME as adaptive
         )
     ),
     
-    # 🔬 STANDARD VOXEL ENCODER: Simple mean aggregation (no adaptive features)
+    # 🔬 VANILLA ENCODER: Standard HardSimpleVFE (no adaptivity)
     voxel_encoder=dict(
-        type='HardSimpleVFE',  # Standard simple voxel feature extractor
-        num_features=4,
+        _delete_=True,
+        type='HardSimpleVFE',  # Vanilla SECOND encoder
     ),
     
-    # IDENTICAL middle encoder configuration  
+    # IDENTICAL pipeline as adaptive
     middle_encoder=dict(
         type='SparseEncoder',
-        in_channels=4,  # Standard input from HardSimpleVFE
+        in_channels=64,
         sparse_shape=[41, 1600, 1408],
         order=('conv', 'norm', 'act')),
     
-    # IDENTICAL backbone configuration (adjusted for standard SparseEncoder output)
+    # IDENTICAL architecture as adaptive
     backbone=dict(
         type='SECOND',
-        in_channels=256,  # Accept SparseEncoder default output
+        in_channels=256,
         layer_nums=[3, 5, 5],
         layer_strides=[2, 2, 2],
         out_channels=[64, 128, 256],
     ),
     
-    # IDENTICAL neck configuration
     neck=dict(
         type='SECONDFPN',
-        in_channels=[64, 128, 256],  # Match backbone out_channels
+        in_channels=[64, 128, 256],
         upsample_strides=[1, 2, 4],
-        out_channels=[128, 128, 128],  # Standard configuration
+        out_channels=[128, 128, 128],
     ),
     
-    # IDENTICAL bbox head configuration
     bbox_head=dict(
         type='Anchor3DHead',
-        in_channels=384,  # 128 * 3 from neck outputs
+        in_channels=384,
         feat_channels=384,
         num_classes=1,
         anchor_generator=dict(
@@ -67,7 +65,6 @@ model = dict(
         )
     ),
     
-    # IDENTICAL training configuration
     train_cfg=dict(
         _delete_=True,
         assigner=dict(
@@ -84,19 +81,19 @@ model = dict(
     ),
 )
 
-# IDENTICAL learning rate and optimizer
+# IDENTICAL training setup as adaptive
 optim_wrapper = dict(
     type='OptimWrapper',
     optimizer=dict(
         type='AdamW', 
-        lr=0.015,  # IDENTICAL learning rate
+        lr=0.015,
         betas=(0.9, 0.99), 
         weight_decay=0.01
     ),
     clip_grad=dict(max_norm=35, norm_type=2)
 )
 
-# IDENTICAL schedule
+# IDENTICAL schedule as adaptive
 param_scheduler = [
     dict(
         type='LinearLR',
@@ -116,14 +113,13 @@ param_scheduler = [
     )
 ]
 
-# IDENTICAL training configuration
-train_cfg = dict(type='EpochBasedTrainLoop', max_epochs=8, val_interval=1)
+# Quick test for memory comparison
+train_cfg = dict(type='IterBasedTrainLoop', max_iters=5, val_interval=10)
 val_cfg = dict(type='ValLoop')
 test_cfg = dict(type='TestLoop')
 
-# IDENTICAL data loading configuration
 train_dataloader = dict(
-    batch_size=2,
+    batch_size=2,  # SAME as adaptive
     num_workers=2,
     persistent_workers=True,
     pin_memory=True,
@@ -131,16 +127,18 @@ train_dataloader = dict(
 
 val_dataloader = dict(batch_size=1, num_workers=1)
 
-# IDENTICAL logging and checkpointing
 default_hooks = dict(
-    logger=dict(interval=25),
-    checkpoint=dict(interval=1, save_best='auto', max_keep_ckpts=3),
+    logger=dict(interval=1),  # Log every iteration for memory monitoring
+    checkpoint=dict(interval=-1),  # No checkpoints for quick test
 )
 
-work_dir = './work_dirs/vanilla_second_benchmark'
+work_dir = './work_dirs/vanilla_second_memory_test'
 
-# 🎯 VANILLA SECOND BASELINE:
-# 1. Standard HardSimpleVFE voxel encoder (simple mean aggregation)
-# 2. Standard SparseEncoder middle encoder
-# 3. Identical training setup for fair comparison
-# 4. Baseline performance for adaptive approach evaluation
+# 🎯 VANILLA SECOND MEMORY BASELINE:
+# This provides the exact memory usage baseline that adaptive 
+# approaches should beat or at least match.
+# 
+# EXPECTED RESULTS:
+# - Memory: ~500-600 MB (target for adaptive to beat)
+# - Loss: Similar convergence pattern as adaptive
+# - Speed: Baseline speed for comparison

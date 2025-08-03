@@ -3,12 +3,17 @@ from .pillar_encoder import DynamicPillarFeatureNet, PillarFeatureNet
 from .voxel_encoder import (DynamicSimpleVFE, DynamicVFE, HardSimpleVFE,
                             HardVFE, SegVFE)
 
-# Research: Adaptive voxelization modules
-from .adaptive_sparse_bridge import AdaptiveSparseBridge
-from .adaptive_learnable_voxel import AdaptiveLearnableVoxelLayer, AdaptiveVoxelEncoder, ImportancePredictor
+# Research: Multi-scale adaptive voxelization 
+from .multi_scale_adaptive_voxel import (MultiScaleAdaptiveVoxelEncoder, 
+                                        MultiScaleImportancePredictor,
+                                        MultiScaleFeatureFusion)
+
+# 🚀 Optimized adaptive voxelization
+from .optimized_multi_scale_adaptive_voxel import OptimizedMultiScaleAdaptiveVoxelEncoder
 
 __all__ = [
-    'PillarFeatureNet', 'DynamicPillarFeatureNet', 'HardVFE', 'DynamicVFE',
-    'HardSimpleVFE', 'DynamicSimpleVFE', 'SegVFE', 'AdaptiveSparseBridge',
-    'AdaptiveLearnableVoxelLayer', 'AdaptiveVoxelEncoder', 'ImportancePredictor'
+    'DynamicPillarFeatureNet', 'PillarFeatureNet', 'DynamicSimpleVFE', 'DynamicVFE', 
+    'HardSimpleVFE', 'HardVFE', 'SegVFE',
+    'MultiScaleAdaptiveVoxelEncoder', 'MultiScaleImportancePredictor', 'MultiScaleFeatureFusion',
+    'OptimizedMultiScaleAdaptiveVoxelEncoder'
 ]
