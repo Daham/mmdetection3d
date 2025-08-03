@@ -14,9 +14,15 @@ from .optimized_multi_scale_adaptive_voxel import OptimizedMultiScaleAdaptiveVox
 # 🎯 Advanced multi-scale VFE with attention
 from .multi_scale_vfe_with_attention import MultiScaleVFEWithAttention
 
+# ✨ Importance-guided multi-scale VFE with point filtering
+from .importance_guided_multi_scale_vfe import (ImportanceGuidedMultiScaleVFE,
+                                               LightweightPointImportanceNet,
+                                               ScaleSpecificLightweightVFE)
+
 __all__ = [
     'DynamicPillarFeatureNet', 'PillarFeatureNet', 'DynamicSimpleVFE', 'DynamicVFE', 
     'HardSimpleVFE', 'HardVFE', 'SegVFE',
     'MultiScaleAdaptiveVoxelEncoder', 'MultiScaleImportancePredictor', 'MultiScaleFeatureFusion',
-    'OptimizedMultiScaleAdaptiveVoxelEncoder', 'MultiScaleVFEWithAttention'
+    'OptimizedMultiScaleAdaptiveVoxelEncoder', 'MultiScaleVFEWithAttention',
+    'ImportanceGuidedMultiScaleVFE', 'LightweightPointImportanceNet', 'ScaleSpecificLightweightVFE'
 ]
