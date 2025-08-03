@@ -1,5 +1,5 @@
-# 🚀 REFACTORED Adaptive Multi-Scale Configuration with Gumbel-Softmax
-# Uses the new ImportanceGuidedMultiScaleVFE with differentiable scale selection
+# 🔥 ENHANCED Adaptive Multi-Scale Configuration with FIXED gradient flow
+# Uses the new ImportanceGuidedMultiScaleVFE with aggressive scale learning
 
 _base_ = [
     '../_base_/models/second_hv_secfpn_kitti.py',
@@ -11,7 +11,16 @@ _base_ = [
 point_cloud_range = [0, -39.68, -3, 69.12, 39.68, 1]
 class_names = ['Car']
 
-# � ENHANCED ADAPTIVE VOXELIZATION: Fixed gradient flow and scale learning
+# Model configuration with ENHANCED adaptive voxelization
+model = dict(
+    type='VoxelNet',
+    data_preprocessor=dict(
+        type='Det3DDataPreprocessor',
+        voxel=False,
+        voxel_layer=None
+    ),
+    
+    # 🔥 ENHANCED ADAPTIVE VOXELIZATION: Fixed gradient flow and scale learning
     voxel_encoder=dict(
         type='ImportanceGuidedMultiScaleVFE',
         
@@ -39,12 +48,15 @@ class_names = ['Car']
         norm_cfg=dict(type='BN1d', eps=1e-3, momentum=0.01)
     ),
     
-    # 🚀 CPU-COMPATIBLE: Use dense encoder to avoid CUDA sparse conv issues
+    # 🚀 CRITICAL FIX: Use proper sparse encoder that matches our output
     middle_encoder=dict(
-        type='CPUSparseEncoder',  # Use CPU encoder for compatibility
-        in_channels=129,  # Updated for new output channels (128 + 1)
+        type='SparseEncoder',  # Use standard sparse encoder
+        in_channels=129,  # 128 + 1 for scale info
         sparse_shape=[41, 1600, 1408],
-        order=('conv', 'norm', 'act')
+        order=('conv', 'norm', 'act'),
+        norm_cfg=dict(type='BN1d', eps=1e-3, momentum=0.01),
+        base_channels=16,
+        output_channels=128
     ),
     
     # 🚀 OPTIMIZATION: Adjusted backbone for new channel dimensions
@@ -110,78 +122,74 @@ class_names = ['Car']
         allowed_border=0,
         pos_weight=-1,
         debug=False
+    ),
+    
+    # Test configuration
+    test_cfg=dict(
+        use_rotate_nms=True,
+        nms_across_levels=False,
+        nms_thr=0.01,
+        score_thr=0.1,
+        min_bbox_size=0,
+        nms_pre=100,
+        max_num=50
     )
 )
 
-# � ENHANCED OPTIMIZATION: Stable training setup for adaptive voxelization
+# 🔥 ENHANCED OPTIMIZATION: Stable training setup for adaptive voxelization
 optim_wrapper = dict(
     type='OptimWrapper',
     optimizer=dict(
         type='AdamW',
-        lr=0.001,  # � REDUCED learning rate for gradient stability
+        lr=0.001,  # 🔥 REDUCED learning rate for gradient stability
         betas=(0.9, 0.999),  # 🔥 Standard betas for better convergence
         weight_decay=0.005,  # 🔥 Reduced weight decay
         eps=1e-8  # 🔥 Standard epsilon
     ),
-    clip_grad=dict(max_norm=5.0, norm_type=2)  # � AGGRESSIVE gradient clipping
+    clip_grad=dict(max_norm=5.0, norm_type=2)  # 🔥 AGGRESSIVE gradient clipping
 )
 
-# � ENHANCED OPTIMIZATION: Adaptive learning rate schedule
+# 🔥 ENHANCED OPTIMIZATION: Adaptive learning rate schedule
 param_scheduler = [
     dict(
         type='LinearLR',
         start_factor=0.1,  # 🔥 SLOWER warmup start
         by_epoch=False,
         begin=0,
-        end=200,  # � LONGER warmup for stability
+        end=200,  # 🔥 LONGER warmup for stability
     ),
     dict(
         type='CosineAnnealingLR',
-        T_max=6,  # � Longer period for better convergence
+        T_max=6,  # 🔥 Longer period for better convergence
         eta_min=0.0001,  # 🔥 Higher minimum LR
         begin=0,
         end=8,  # 🔥 Extended training epochs
-        by_epoch=True,
         convert_to_iter_based=True
     )
 ]
 
-# 🚀 OPTIMIZATION: Efficient training loop
-train_cfg = dict(type='EpochBasedTrainLoop', max_epochs=3, val_interval=1)
-val_cfg = dict(type='ValLoop')
-test_cfg = dict(type='TestLoop')
+# 🔥 ENHANCED Training configuration
+train_cfg = dict(
+    type='EpochBasedTrainLoop',
+    max_epochs=5,  # 🔥 More epochs for convergence
+    val_interval=1
+)
 
-# 🚀 OPTIMIZATION: Efficient data loading
+# Data configuration (updated for stability)
 train_dataloader = dict(
-    batch_size=1,  # Maintain single batch for memory efficiency
+    batch_size=1,  # Keep batch size 1 for stability
     num_workers=2,
     persistent_workers=True,
     pin_memory=True,
+    dataset=dict(
+        type='RepeatDataset',
+        times=2,
+        dataset=dict(
+            type='KittiDataset'
+        )
+    )
 )
 
-val_dataloader = dict(batch_size=1, num_workers=1)
-
-# 🚀 OPTIMIZATION: Less frequent logging
-default_hooks = dict(
-    logger=dict(interval=20),  # 🚀 Log every 20 iterations instead of 50
-    checkpoint=dict(interval=1),
-)
-
-work_dir = './work_dirs/refactored_adaptive_gumbel_softmax'
-
-# 🎯 REFACTORED IMPLEMENTATION HIGHLIGHTS:
-# - Gumbel-Softmax: Differentiable scale selection (0.05m, 0.1m, 0.2m)
-# - ScaleNet: Lightweight neural network for scale prediction
-# - Multi-scale Processing: Separate VFE for each scale
-# - Feature Fusion: Concatenation and learned fusion of multi-scale features
-# - End-to-end Differentiable: Full backpropagation through scale selection
-
-# 🎓 PHD COMPLIANCE VERIFICATION (REFACTORED VERSION):
-# ✅ Gumbel-Softmax differentiable scale assignment (ScaleNet)
-# ✅ Multi-scale voxel grouping (MultiScaleVoxelizer)
-# ✅ Scale-specific feature processing (ScaleSpecificVFE)
-# ✅ Learnable scale selection parameters (ScaleNet neural network)
-# ✅ Information-based adaptive voxelization (via Gumbel-Softmax)
-# ✅ End-to-end gradient flow (all components are nn.Modules)
-# ✅ Multi-scale feature fusion (RefactoredMultiScaleFeatureFusion)
-# ✅ Production-ready and robust implementation
+# Evaluation configuration
+val_cfg = dict(type='ValLoop')
+test_cfg = dict(type='TestLoop')

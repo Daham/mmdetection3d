@@ -5,8 +5,7 @@ from .voxel_encoder import (DynamicSimpleVFE, DynamicVFE, HardSimpleVFE,
 
 # Research: Multi-scale adaptive voxelization 
 from .multi_scale_adaptive_voxel import (MultiScaleAdaptiveVoxelEncoder, 
-                                        MultiScaleImportancePredictor,
-                                        MultiScaleFeatureFusion)
+                                        MultiScaleImportancePredictor)
 
 # 🚀 Optimized adaptive voxelization
 from .optimized_multi_scale_adaptive_voxel import OptimizedMultiScaleAdaptiveVoxelEncoder
@@ -14,15 +13,19 @@ from .optimized_multi_scale_adaptive_voxel import OptimizedMultiScaleAdaptiveVox
 # 🎯 Advanced multi-scale VFE with attention
 from .multi_scale_vfe_with_attention import MultiScaleVFEWithAttention
 
-# ✨ Importance-guided multi-scale VFE with point filtering
+# ✨ Refactored importance-guided multi-scale VFE with Gumbel-Softmax
 from .importance_guided_multi_scale_vfe import (ImportanceGuidedMultiScaleVFE,
-                                               LightweightPointImportanceNet,
-                                               ScaleSpecificLightweightVFE)
+                                                 ScaleNet,
+                                                 MultiScaleVoxelizer,
+                                                 ScaleSpecificVFE,
+                                                 RefactoredMultiScaleFeatureFusion,
+                                                 LightweightPointImportanceNet)
 
 __all__ = [
     'DynamicPillarFeatureNet', 'PillarFeatureNet', 'DynamicSimpleVFE', 'DynamicVFE', 
     'HardSimpleVFE', 'HardVFE', 'SegVFE',
-    'MultiScaleAdaptiveVoxelEncoder', 'MultiScaleImportancePredictor', 'MultiScaleFeatureFusion',
+    'MultiScaleAdaptiveVoxelEncoder', 'MultiScaleImportancePredictor',
     'OptimizedMultiScaleAdaptiveVoxelEncoder', 'MultiScaleVFEWithAttention',
-    'ImportanceGuidedMultiScaleVFE', 'LightweightPointImportanceNet', 'ScaleSpecificLightweightVFE'
+    'ImportanceGuidedMultiScaleVFE', 'ScaleNet', 'MultiScaleVoxelizer', 
+    'ScaleSpecificVFE', 'RefactoredMultiScaleFeatureFusion', 'LightweightPointImportanceNet'
 ]

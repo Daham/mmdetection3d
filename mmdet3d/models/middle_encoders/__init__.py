@@ -9,6 +9,7 @@ from .multi_scale_parallel_middle_encoder import MultiScaleParallelMiddleEncoder
 from .fallback_multi_scale_parallel_middle_encoder import FallbackMultiScaleParallelMiddleEncoder
 from .efficient_multi_scale_parallel_middle_encoder import EfficientMultiScaleParallelMiddleEncoder
 from .enhanced_multi_scale_parallel_middle_encoder import EnhancedMultiScaleParallelMiddleEncoder
+from .cpu_compatible_encoder import CPUCompatibleDenseEncoder
 
 __all__ = [
     'PointPillarsScatter', 'SparseEncoder', 'SparseEncoderSASSD',
@@ -17,4 +18,5 @@ __all__ = [
     'FallbackMultiScaleParallelMiddleEncoder',  # Spconv-free fallback solution
     'EfficientMultiScaleParallelMiddleEncoder',  # High-performance vectorized solution
     'EnhancedMultiScaleParallelMiddleEncoder',  # For advanced multi-scale VFE with attention
+    'CPUCompatibleDenseEncoder',  # CPU-compatible dense encoder for testing adaptive voxelization
 ]

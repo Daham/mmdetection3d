@@ -49,26 +49,36 @@ model = dict(
         )
     ),
     
-    # 🌟 Importance-guided multi-scale VFE
+    # 🌟 Importance-guided multi-scale VFE with TRUE ADAPTIVE VOXELIZATION
     voxel_encoder=dict(
         type='ImportanceGuidedMultiScaleVFE',
-        voxel_scales=[0.05, 0.1, 0.2],  # Multi-scale voxelization
+        
+        # Adaptive voxelization config - PhD COMPLIANT
+        num_scales=3,
+        base_voxel_size=0.1,
+        fine_scale_init=0.5,   # Learnable parameter initial value
+        coarse_scale_init=2.0, # Learnable parameter initial value
+        
+        # Standard VFE config
         feature_dim=64,
         max_num_points=5,
         max_voxels=(12000, 30000),
         point_cloud_range=point_cloud_range,
         
         # Importance network configuration
-        importance_keep_ratio=0.7,  # Keep 70% of most important points
         importance_hidden_dims=[64, 32, 16],  # 3-layer lightweight MLP
         importance_dropout=0.1,
+        
+        # Scale selection network config - PhD COMPLIANT
+        scale_selection_hidden_dims=[64, 32, 16],
+        scale_selection_dropout=0.1,
+        use_contextual_attention=True,
         
         # Lightweight VFE configuration
         vfe_channels=[32, 64],  # Smaller channels for efficiency
         scale_embedding_dim=8,  # Compact scale embeddings
         
         # Fusion configuration
-        attention_dim=32,
         fusion_channels=128,
     ),
     

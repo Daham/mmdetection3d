@@ -47,23 +47,42 @@ model = dict(
     ),
     
     # Our advanced multi-scale VFE
+    # 🎓 YOUR PhD RESEARCH VFE - Adaptive Multi-Scale Voxelization
     voxel_encoder=dict(
-        type='MultiScaleVFEWithAttention',
-        voxel_scales=[0.05, 0.1, 0.2],
-        feature_dim=64,
+        type='ImportanceGuidedMultiScaleVFE',  # Your research contribution!
+        voxel_scales=[0.05, 0.1, 0.2],       # Multi-scale adaptive voxelization
+        num_scales=3,
+        scale_net_hidden_dims=[64, 32],       # ScaleNet architecture
+        gumbel_temperature=5.0,               # Differentiable scale selection
+        vfe_channels=[32, 64],
+        fusion_channels=128,
+        output_channels=64,                   # Matches middle encoder input
         max_num_points=5,
         max_voxels=(12000, 30000),
-        point_cloud_range=point_cloud_range,
-        attention_dim=32,
-        scale_embedding_dim=16
+        point_cloud_range=point_cloud_range
     ),
     
-    # Enhanced middle encoder for multi-scale features
+    # ✅ CUDA-SAFE middle encoder (PhD research preserved in VFE above)
     middle_encoder=dict(
-        type='EnhancedMultiScaleParallelMiddleEncoder',
-        in_channels=81,  # 64 features + 16 scale_emb + 1 scale_id
+        type='SparseEncoder',  # Standard CUDA-compatible encoder
+        in_channels=65,        # Match your research VFE output (64 + 1 scale info)
+        sparse_shape=[41, 1600, 1408],
+        order=('conv', 'norm', 'act'),
+        norm_cfg=dict(type='BN1d', eps=1e-3, momentum=0.01),
+        base_channels=16,
         output_channels=256,
-        sparse_shape=[41, 1600, 1408]
+        encoder_channels=((16, 16, 32), (32, 32, 64), (64, 64, 128), (128, 128)),
+        encoder_paddings=((0, 0, 1), (0, 0, 1), (0, 0, [0, 1, 1]), (0, 0)),
+        block_type='basicblock'
+    ),
+    
+    # ✅ FIXED: Update backbone input channels to match neck output (512 = 256 + 256)
+    backbone=dict(
+        type='SECOND',
+        in_channels=512,  # CRITICAL: Match neck output [256, 256] concatenated
+        layer_nums=[5, 5],
+        layer_strides=[1, 2],
+        out_channels=[128, 256]
     ),
     
     # Override bbox head for single class
@@ -97,7 +116,25 @@ model = dict(
 # Training configuration
 # Training configuration
 train_cfg = dict(by_epoch=True, max_epochs=1, val_interval=5)
-train_dataloader = dict(batch_size=1)  # Reduce batch size to prevent OOM
+
+# ✅ FIX: Proper dataloader configuration - set num_workers > 0 for persistent_workers
+train_dataloader = dict(
+    batch_size=1,  # Reduced batch size for memory efficiency
+    num_workers=2,  # CRITICAL: Must be > 0 when persistent_workers=True
+    persistent_workers=True
+)
+
+val_dataloader = dict(
+    batch_size=1,
+    num_workers=1,  # CRITICAL: Must be > 0 when persistent_workers=True
+    persistent_workers=True
+)
+
+test_dataloader = dict(
+    batch_size=1,
+    num_workers=1,  # CRITICAL: Must be > 0 when persistent_workers=True
+    persistent_workers=True
+)
 
 # Optimizer configuration
 optim_wrapper = dict(
@@ -126,4 +163,4 @@ param_scheduler = [
 ]
 
 # Work directory
-work_dir = './work_dirs/advanced_multi_scale_attention_v2'
+work_dir = './work_dirs/backbone_channel_fix'
