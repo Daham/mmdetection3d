@@ -286,21 +286,71 @@ class ScaleNet(nn.Module):
     def __init__(self,
                  in_channels: int = 4,  # x, y, z, intensity
                  hidden_dims: List[int] = [64, 32],
-                 num_scales: int = 3,  # 0.05m, 0.1m, 0.2m
+                 num_scales: int = 3,  # Default 3 scales for backward compatibility
                  temperature: float = 5.0,  # 🔥 HIGHER initial temperature for better exploration
                  dropout_rate: float = 0.05):  # 🔥 REDUCED dropout to prevent gradient killing
         super().__init__()
         
-        self.num_scales = num_scales
+        # Store parameters as instance variables for network building
+        self.in_channels = in_channels
+        self.hidden_dims = hidden_dims
+        self.dropout_rate = dropout_rate
+        
+        # 🚀 ENHANCED: Support up to 10 scales dynamically
+        self.num_scales = min(max(num_scales, 1), 10)  # Clamp between 1-10 scales
         # Aggressive temperature scheduling with learnable decay
         self.temperature = nn.Parameter(torch.tensor(temperature))
         self.temperature_decay = nn.Parameter(torch.tensor(0.9995))  # Learnable decay rate
         self.min_temperature = 0.5  # Minimum temperature threshold
         self.iteration_count = 0  # Track iterations for scheduling
         
-        # More diverse scales for stronger differentiation
-        self.register_buffer('voxel_scales', torch.tensor([0.02, 0.15, 0.6]))  # 30x scale range!
+        # 🎯 SMART SCALE GENERATION: Automatically generate optimal scale distribution
+        self._generate_optimal_scales()
         
+        # Build the network after initialization
+        self._build_network()
+        
+    def _generate_optimal_scales(self):
+        """
+        🚀 ENHANCED: Generate optimal voxel scales based on number of scales.
+        Uses logarithmic distribution for maximum coverage and differentiation.
+        """
+        if self.num_scales == 1:
+            # Single scale: Use medium resolution
+            scales = [0.1]
+        elif self.num_scales == 2:
+            # Two scales: Fine and coarse
+            scales = [0.05, 0.2]
+        elif self.num_scales == 3:
+            # Original three scales (backward compatibility)
+            scales = [0.02, 0.15, 0.6]
+        else:
+            # 4-10 scales: Logarithmic distribution for optimal coverage
+            # Range from 0.01m (1cm) to 1.0m (1m) 
+            min_scale = 0.01  # 1cm - finest detail
+            max_scale = 1.0   # 1m - largest context
+            
+            # Generate logarithmically spaced scales
+            log_min = torch.log(torch.tensor(min_scale))
+            log_max = torch.log(torch.tensor(max_scale))
+            log_scales = torch.linspace(log_min, log_max, self.num_scales)
+            scales = torch.exp(log_scales).tolist()
+        
+        # Register as buffer for proper device handling
+        self.register_buffer('voxel_scales', torch.tensor(scales))
+        
+        print(f"🎯 ScaleNet initialized with {self.num_scales} scales: {[f'{s:.3f}m' for s in scales]}")
+        
+    def get_scale_info(self):
+        """Return current scale configuration."""
+        return {
+            'num_scales': self.num_scales,
+            'scales': self.voxel_scales.tolist(),
+            'scale_range': f"{self.voxel_scales.min():.3f}m - {self.voxel_scales.max():.3f}m"
+        }
+        
+    def _build_network(self):
+        """Build the scale prediction network."""
         # Deeper spatial encoding for better scale prediction
         self.spatial_encoder = nn.Sequential(
             nn.Linear(3, 32),  # Enhanced spatial capacity
@@ -313,33 +363,64 @@ class ScaleNet(nn.Module):
         
         # Enhanced MLP with residual connections and layer normalization
         layers = []
-        prev_dim = in_channels + 8  # 4 + 8 spatial features
+        prev_dim = self.in_channels + 8  # 4 + 8 spatial features
         
-        for i, hidden_dim in enumerate(hidden_dims):
+        for i, hidden_dim in enumerate(self.hidden_dims):
             # Add residual connection for the first layer
             if i == 0 and prev_dim == hidden_dim:
                 layers.extend([
-                    ResidualBlock(prev_dim, hidden_dim, dropout_rate),
+                    ResidualBlock(prev_dim, hidden_dim, self.dropout_rate),
                 ])
             else:
                 layers.extend([
                     nn.Linear(prev_dim, hidden_dim),
                     nn.LayerNorm(hidden_dim),  # LayerNorm instead of BatchNorm for stability
                     nn.ReLU(inplace=True),
-                    nn.Dropout(dropout_rate)
+                    nn.Dropout(self.dropout_rate)
                 ])
             prev_dim = hidden_dim
         
-        # Aggressive bias initialization to force scale diversity
-        final_layer = nn.Linear(prev_dim, num_scales)
+        # 🚀 ENHANCED: Dynamic bias initialization based on number of scales
+        final_layer = nn.Linear(prev_dim, self.num_scales)
         nn.init.xavier_uniform_(final_layer.weight, gain=2.0)  # Higher weight initialization
-        # Strong bias toward different scales
-        final_layer.bias.data[0] = 1.5   # Strongly favor fine scale
-        final_layer.bias.data[1] = 0.0   # Neutral medium scale  
-        final_layer.bias.data[2] = -1.5  # Strongly discourage coarse scale initially
+        
+        # Smart bias initialization for scale diversity
+        self._initialize_scale_biases(final_layer)
         
         layers.append(final_layer)
         self.scale_predictor = nn.Sequential(*layers)
+        
+    def _initialize_scale_biases(self, final_layer):
+        """
+        🎯 SMART BIAS INITIALIZATION: Encourage scale diversity based on number of scales.
+        """
+        num_scales = self.num_scales
+        
+        if num_scales <= 3:
+            # Original bias pattern for 1-3 scales
+            if num_scales >= 1:
+                final_layer.bias.data[0] = 1.5   # Strongly favor fine scale
+            if num_scales >= 2:
+                final_layer.bias.data[1] = 0.0   # Neutral medium scale  
+            if num_scales >= 3:
+                final_layer.bias.data[2] = -1.5  # Discourage coarse scale initially
+        else:
+            # For 4+ scales: Create smooth bias gradient
+            bias_values = torch.linspace(2.0, -2.0, num_scales)  # From fine-favoring to coarse-discouraging
+            final_layer.bias.data = bias_values
+        
+    def forward(self, points: torch.Tensor, training: bool = True) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Predict scale assignment for each point using Gumbel-Softmax.
+        
+        Args:
+            points: (N, 4) - x, y, z, intensity
+            training: whether in training mode
+            
+        Returns:
+            scale_assignment: (N, num_scales) - differentiable scale assignment
+            predicted_scales: (N,) - actual voxel sizes for each point
+        """
         
     def forward(self, points: torch.Tensor, training: bool = True) -> Tuple[torch.Tensor, torch.Tensor]:
         """
@@ -712,9 +793,9 @@ class ImportanceGuidedMultiScaleVFE(nn.Module):
     """
     
     def __init__(self,
-                 # Multi-scale config
-                 voxel_scales: List[float] = [0.05, 0.1, 0.2],
-                 num_scales: int = 3,
+                 # Multi-scale config - 🚀 ENHANCED: Support 1-10 scales dynamically
+                 voxel_scales: List[float] = [0.05, 0.1, 0.2],  # Default 3 scales for backward compatibility
+                 num_scales: int = 3,  # Can be 1-10, overrides voxel_scales if different length
                  
                  # Standard VFE config
                  max_num_points: int = 5,
@@ -743,8 +824,20 @@ class ImportanceGuidedMultiScaleVFE(nn.Module):
         if kwargs:
             pass  # Silently ignore extra parameters for compatibility
         
-        self.voxel_scales = voxel_scales
-        self.num_scales = num_scales
+        # 🚀 ENHANCED: Smart scale handling - auto-generate if num_scales differs from voxel_scales
+        if len(voxel_scales) != num_scales:
+            print(f"🎯 Auto-generating {num_scales} scales (overriding provided {len(voxel_scales)} scales)")
+            # Use ScaleNet's scale generation logic for consistency
+            self.num_scales = min(max(num_scales, 1), 10)  # Clamp 1-10
+            # Temporary ScaleNet to generate optimal scales
+            temp_scale_net = ScaleNet(num_scales=self.num_scales)
+            self.voxel_scales = temp_scale_net.voxel_scales.tolist()
+        else:
+            self.voxel_scales = voxel_scales
+            self.num_scales = len(voxel_scales)
+            
+        print(f"🚀 ImportanceGuidedMultiScaleVFE: Using {self.num_scales} scales: {[f'{s:.3f}m' for s in self.voxel_scales]}")
+        
         self.max_num_points = max_num_points
         self.max_voxels = max_voxels
         self.point_cloud_range = point_cloud_range
@@ -753,21 +846,21 @@ class ImportanceGuidedMultiScaleVFE(nn.Module):
         self.scale_net = ScaleNet(
             in_channels=4,  # x, y, z, intensity
             hidden_dims=scale_net_hidden_dims,
-            num_scales=num_scales,
+            num_scales=self.num_scales,  # Use the processed num_scales
             temperature=gumbel_temperature
         )
         
         # 2. Multi-scale voxelizer
         self.multi_scale_voxelizer = MultiScaleVoxelizer(
-            voxel_scales=voxel_scales,
+            voxel_scales=self.voxel_scales,  # Use the processed voxel_scales
             max_num_points=max_num_points,
             max_voxels=max_voxels,
             point_cloud_range=point_cloud_range
         )
         
-        # 3. Scale-specific VFEs
+        # 3. 🚀 ENHANCED: Dynamic scale-specific VFEs creation
         self.scale_vfes = nn.ModuleList()
-        for i in range(num_scales):
+        for i in range(self.num_scales):  # Use processed num_scales
             vfe = ScaleSpecificVFE(
                 in_channels=4,  # x, y, z, intensity
                 feat_channels=vfe_channels,
@@ -776,8 +869,8 @@ class ImportanceGuidedMultiScaleVFE(nn.Module):
             )
             self.scale_vfes.append(vfe)
         
-        # 4. Multi-scale feature fusion
-        scale_channels = [vfe_channels[-1]] * num_scales  # Each scale outputs same channels
+        # 4. 🚀 ENHANCED: Dynamic multi-scale feature fusion
+        scale_channels = [vfe_channels[-1]] * self.num_scales  # Dynamic channels based on actual num_scales
         self.feature_fusion = RefactoredMultiScaleFeatureFusion(
             scale_channels=scale_channels,
             fusion_channels=fusion_channels,
