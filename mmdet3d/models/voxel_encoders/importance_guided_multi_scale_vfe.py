@@ -7,7 +7,7 @@ importance network to filter points before voxelization, following the architect
 
 Point Cloud → Importance Net → Top-K Selection → Multi-Scale Voxelization → VFE
 
-Author: PhD Research Implementation  
+Author: Daham Pathiraja
 Date: August 3, 2025
 """
 
