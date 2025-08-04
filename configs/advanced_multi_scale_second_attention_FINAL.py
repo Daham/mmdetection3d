@@ -47,19 +47,21 @@ model = dict(
     ),
     
     # Our advanced multi-scale VFE
-    # 🎓 YOUR PhD RESEARCH VFE - Adaptive Multi-Scale Voxelization
+    # 🎓 YOUR PhD RESEARCH VFE - ENHANCED 10-Scale Adaptive Voxelization
     voxel_encoder=dict(
         type='ImportanceGuidedMultiScaleVFE',  # Your research contribution!
-        voxel_scales=[0.05, 0.1, 0.2],       # Multi-scale adaptive voxelization
-        num_scales=3,
-        scale_net_hidden_dims=[64, 32],       # ScaleNet architecture
-        gumbel_temperature=5.0,               # Differentiable scale selection
+        # 🚀 ENHANCED: 10 scales with automatic optimal generation (0.01m to 1.0m)
+        num_scales=10,                        # 10-scale multi-resolution voxelization
+        scale_net_hidden_dims=[64, 32],       # ScaleNet architecture for 10-scale selection
+        gumbel_temperature=5.0,               # Differentiable scale selection with diversity
         vfe_channels=[32, 64],
         fusion_channels=128,
         output_channels=64,                   # Matches middle encoder input
         max_num_points=5,
         max_voxels=(12000, 30000),
         point_cloud_range=point_cloud_range
+        # Note: voxel_scales auto-generated as [0.010m, 0.017m, 0.028m, 0.046m, 0.077m, 
+        #       0.129m, 0.215m, 0.359m, 0.599m, 1.000m] when num_scales=10
     ),
     
     # ✅ CUDA-SAFE middle encoder (PhD research preserved in VFE above)
