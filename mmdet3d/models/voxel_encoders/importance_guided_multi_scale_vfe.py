@@ -288,7 +288,13 @@ class ScaleNet(nn.Module):
                  hidden_dims: List[int] = [64, 32],
                  num_scales: int = 3,  # Default 3 scales for backward compatibility
                  temperature: float = 5.0,  # 🔥 HIGHER initial temperature for better exploration
-                 dropout_rate: float = 0.05):  # 🔥 REDUCED dropout to prevent gradient killing
+                 dropout_rate: float = 0.05,  # 🔥 REDUCED dropout to prevent gradient killing
+                 
+                 # 🌊 NEW: Continuous prediction parameters
+                 continuous_mode: bool = False,  # Enable continuous voxel size prediction
+                 min_voxel_size: float = None,  # Auto-detect from voxel_scales if None
+                 max_voxel_size: float = None,  # Auto-detect from voxel_scales if None
+                 interpolation_neighbors: int = 3):  # Number of neighbors for interpolation
         super().__init__()
         
         # Store parameters as instance variables for network building
@@ -298,6 +304,11 @@ class ScaleNet(nn.Module):
         
         # 🚀 ENHANCED: Support up to 10 scales dynamically
         self.num_scales = min(max(num_scales, 1), 10)  # Clamp between 1-10 scales
+        
+        # 🌊 NEW: Continuous prediction configuration
+        self.continuous_mode = continuous_mode
+        self.interpolation_neighbors = min(interpolation_neighbors, self.num_scales)
+        
         # Aggressive temperature scheduling with learnable decay
         self.temperature = nn.Parameter(torch.tensor(temperature))
         self.temperature_decay = nn.Parameter(torch.tensor(0.9995))  # Learnable decay rate
@@ -306,6 +317,13 @@ class ScaleNet(nn.Module):
         
         # 🎯 SMART SCALE GENERATION: Automatically generate optimal scale distribution
         self._generate_optimal_scales()
+        
+        # 🌊 NEW: Set continuous prediction range after scales are generated
+        if self.continuous_mode:
+            self.min_voxel_size = min_voxel_size if min_voxel_size is not None else self.voxel_scales[0].item()
+            self.max_voxel_size = max_voxel_size if max_voxel_size is not None else self.voxel_scales[-1].item()
+            print(f"🌊 Continuous mode enabled: {self.min_voxel_size:.3f}m - {self.max_voxel_size:.3f}m")
+            print(f"🎯 Using {self.interpolation_neighbors} neighbors for interpolation")
         
         # Build the network after initialization
         self._build_network()
@@ -350,7 +368,7 @@ class ScaleNet(nn.Module):
         }
         
     def _build_network(self):
-        """Build the scale prediction network."""
+        """Build the scale prediction network with optional continuous heads."""
         # Deeper spatial encoding for better scale prediction
         self.spatial_encoder = nn.Sequential(
             nn.Linear(3, 32),  # Enhanced spatial capacity
@@ -390,6 +408,30 @@ class ScaleNet(nn.Module):
         layers.append(final_layer)
         self.scale_predictor = nn.Sequential(*layers)
         
+        # 🌊 NEW: Continuous prediction heads
+        if self.continuous_mode:
+            # Use the same feature dimension as the scale predictor input
+            feature_dim = self.in_channels + 8  # 4 + 8 spatial features
+            
+            # Continuous voxel size regression head
+            self.continuous_head = nn.Sequential(
+                nn.Linear(feature_dim, 32),
+                nn.ReLU(inplace=True),
+                nn.Dropout(self.dropout_rate * 0.5),  # Lower dropout for regression
+                nn.Linear(32, 1),  # Single continuous value
+                nn.Sigmoid()  # Normalize to [0, 1] for interpolation
+            )
+            
+            # Confidence prediction head for soft interpolation weighting
+            self.confidence_head = nn.Sequential(
+                nn.Linear(feature_dim, 16),
+                nn.ReLU(inplace=True),
+                nn.Linear(16, 1),
+                nn.Sigmoid()  # Confidence in [0, 1]
+            )
+            
+            print(f"🌊 Added continuous prediction heads for {self.min_voxel_size:.3f}m - {self.max_voxel_size:.3f}m range")
+        
     def _initialize_scale_biases(self, final_layer):
         """
         🎯 SMART BIAS INITIALIZATION: Encourage scale diversity based on number of scales.
@@ -424,7 +466,7 @@ class ScaleNet(nn.Module):
         
     def forward(self, points: torch.Tensor, training: bool = True) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        Predict scale assignment for each point using Gumbel-Softmax.
+        Predict scale assignment for each point using Gumbel-Softmax or continuous prediction.
         
         Args:
             points: (N, 4) - x, y, z, intensity
@@ -454,6 +496,14 @@ class ScaleNet(nn.Module):
         normalized_points = F.normalize(points, dim=1)  # Normalize input features
         enhanced_features = torch.cat([normalized_points, spatial_features], dim=1)  # (N, 4+8)
         
+        # 🌊 NEW: Choose prediction mode
+        if self.continuous_mode:
+            return self._continuous_forward(enhanced_features, training)
+        else:
+            return self._discrete_forward(enhanced_features, current_temp, training)
+    
+    def _discrete_forward(self, enhanced_features: torch.Tensor, current_temp: float, training: bool) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Original discrete scale prediction using Gumbel-Softmax."""
         # Predict scale logits with enhanced features
         scale_logits = self.scale_predictor(enhanced_features)  # (N, num_scales)
         
@@ -489,6 +539,61 @@ class ScaleNet(nn.Module):
         predicted_scales = torch.sum(scale_assignment * self.voxel_scales.unsqueeze(0), dim=1)  # (N,)
         
         return scale_assignment, predicted_scales
+    
+    def _continuous_forward(self, enhanced_features: torch.Tensor, training: bool) -> Tuple[torch.Tensor, torch.Tensor]:
+        """🌊 NEW: Continuous voxel size prediction with soft interpolation."""
+        # Predict continuous voxel size in normalized [0, 1] range
+        continuous_pred = self.continuous_head(enhanced_features).squeeze(-1)  # (N,)
+        confidence = self.confidence_head(enhanced_features).squeeze(-1)  # (N,)
+        
+        # Map to actual voxel size range
+        voxel_size_range = self.max_voxel_size - self.min_voxel_size
+        predicted_scales = self.min_voxel_size + continuous_pred * voxel_size_range  # (N,)
+        
+        # Compute soft interpolation weights for nearest discrete scales
+        scale_assignment = self._compute_soft_interpolation_weights(predicted_scales, confidence)
+        
+        return scale_assignment, predicted_scales
+    
+    def _compute_soft_interpolation_weights(self, predicted_scales: torch.Tensor, confidence: torch.Tensor) -> torch.Tensor:
+        """
+        🌊 Compute soft interpolation weights for continuous voxel sizes.
+        
+        Args:
+            predicted_scales: (N,) continuous voxel sizes
+            confidence: (N,) confidence scores
+            
+        Returns:
+            scale_assignment: (N, num_scales) soft weights for interpolation
+        """
+        N = predicted_scales.shape[0]
+        device = predicted_scales.device
+        
+        # Compute distances to all discrete scales
+        distances = torch.abs(predicted_scales.unsqueeze(1) - self.voxel_scales.unsqueeze(0))  # (N, num_scales)
+        
+        # Find nearest neighbors
+        _, nearest_indices = torch.topk(distances, self.interpolation_neighbors, dim=1, largest=False)  # (N, k)
+        
+        # Create soft assignment matrix
+        scale_assignment = torch.zeros(N, self.num_scales, device=device)
+        
+        for i in range(N):
+            neighbor_indices = nearest_indices[i]  # (k,)
+            neighbor_distances = distances[i, neighbor_indices]  # (k,)
+            
+            # Inverse distance weighting with confidence modulation
+            epsilon = 1e-6
+            weights = 1.0 / (neighbor_distances + epsilon)  # (k,)
+            weights = weights * confidence[i]  # Scale by confidence
+            
+            # Normalize weights
+            weights = weights / (torch.sum(weights) + epsilon)  # (k,)
+            
+            # Assign weights to corresponding scales
+            scale_assignment[i, neighbor_indices] = weights
+        
+        return scale_assignment
 
 
 @MODELS.register_module() 
