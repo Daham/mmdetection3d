@@ -294,13 +294,19 @@ class ScaleNet(nn.Module):
                  continuous_mode: bool = False,  # Enable continuous voxel size prediction
                  min_voxel_size: float = None,  # Auto-detect from voxel_scales if None
                  max_voxel_size: float = None,  # Auto-detect from voxel_scales if None
-                 interpolation_neighbors: int = 3):  # Number of neighbors for interpolation
+                 interpolation_neighbors: int = 3,  # Number of neighbors for interpolation
+                 
+                 # 🎓 PhD RESEARCH: Accept initial voxel scales for learnable parameters
+                 voxel_scales: List[float] = None):  # Initial scales to make learnable
         super().__init__()
         
         # Store parameters as instance variables for network building
         self.in_channels = in_channels
         self.hidden_dims = hidden_dims
         self.dropout_rate = dropout_rate
+        
+        # 🎓 PhD RESEARCH: Store provided voxel scales for learnable parameters
+        self.provided_voxel_scales = voxel_scales
         
         # 🚀 ENHANCED: Support up to 10 scales dynamically
         self.num_scales = min(max(num_scales, 1), 10)  # Clamp between 1-10 scales
@@ -333,31 +339,36 @@ class ScaleNet(nn.Module):
         🚀 ENHANCED: Generate optimal voxel scales based on number of scales.
         Uses logarithmic distribution for maximum coverage and differentiation.
         """
-        if self.num_scales == 1:
+        # 🎓 PhD RESEARCH: Use provided scales if available
+        if self.provided_voxel_scales is not None:
+            print(f"🎯 Using provided voxel scales: {self.provided_voxel_scales}")
+            scales = torch.tensor(self.provided_voxel_scales, dtype=torch.float32)
+            self.num_scales = len(scales)  # Update num_scales to match provided scales
+        elif self.num_scales == 1:
             # Single scale: Use medium resolution
-            scales = [0.1]
+            scales = torch.tensor([0.1])
         elif self.num_scales == 2:
             # Two scales: Fine and coarse
-            scales = [0.05, 0.2]
+            scales = torch.tensor([0.05, 0.2])
         elif self.num_scales == 3:
             # Original three scales (backward compatibility)
-            scales = [0.02, 0.15, 0.6]
+            scales = torch.tensor([0.02, 0.15, 0.6])
         else:
             # 4-10 scales: Logarithmic distribution for optimal coverage
             # Range from 0.01m (1cm) to 1.0m (1m) 
             min_scale = 0.01  # 1cm - finest detail
             max_scale = 1.0   # 1m - largest context
             
-            # Generate logarithmically spaced scales
+            # Generate logarithmically spaced scales as initial values
             log_min = torch.log(torch.tensor(min_scale))
             log_max = torch.log(torch.tensor(max_scale))
             log_scales = torch.linspace(log_min, log_max, self.num_scales)
-            scales = torch.exp(log_scales).tolist()
+            scales = torch.exp(log_scales)
+    
+        # Make voxel scales LEARNABLE parameters - this is the key PhD contribution!
+        self.voxel_scales = nn.Parameter(scales, requires_grad=True)
         
-        # Register as buffer for proper device handling
-        self.register_buffer('voxel_scales', torch.tensor(scales))
-        
-        print(f"🎯 ScaleNet initialized with {self.num_scales} scales: {[f'{s:.3f}m' for s in scales]}")
+        print(f"🎯 ScaleNet initialized with {self.num_scales} learnable scales: {[f'{s:.3f}m' for s in scales.tolist()]}")
         
     def get_scale_info(self):
         """Return current scale configuration."""
@@ -366,6 +377,30 @@ class ScaleNet(nn.Module):
             'scales': self.voxel_scales.tolist(),
             'scale_range': f"{self.voxel_scales.min():.3f}m - {self.voxel_scales.max():.3f}m"
         }
+    
+    def get_scale_regularization_loss(self, weight: float = 0.01) -> torch.Tensor:
+        """
+        Get regularization loss for learned voxel scales.
+        
+        This ensures:
+        1. Scales remain positive and reasonable
+        2. Scales maintain diversity (not all converging to same value)
+        3. Scales don't explode during training
+        
+        Args:
+            weight: Regularization weight
+            
+        Returns:
+            Regularization loss for scale parameters
+        """
+        # Ensure scales are positive and within reasonable bounds
+        scale_bound_loss = torch.clamp(0.01 - self.voxel_scales, min=0).sum() + \
+                          torch.clamp(self.voxel_scales - 1.0, min=0).sum()
+        
+        # Encourage diversity in scales (prevent collapse to single scale)
+        scale_diversity_loss = -torch.var(self.voxel_scales)
+        
+        return weight * (scale_bound_loss + 0.1 * scale_diversity_loss)
         
     def _build_network(self):
         """Build the scale prediction network with optional continuous heads."""
@@ -954,13 +989,14 @@ class ImportanceGuidedMultiScaleVFE(nn.Module):
             dropout_rate=0.1
         )
         
-        # 2. Scale prediction network
+        # 2. Scale prediction network with LEARNABLE voxel scales
         self.scale_net = ScaleNet(
             in_channels=4,
             hidden_dims=[64, 32],
             num_scales=self.num_scales,
             temperature=gumbel_temperature,
-            continuous_mode=continuous_mode
+            continuous_mode=continuous_mode,
+            voxel_scales=self.voxel_scales  # Pass initial scales to be made learnable
         )
         
         # 3. Multi-scale voxelizer
@@ -1413,6 +1449,15 @@ class MemoryOptimizedImportanceGuidedMultiScaleVFE(nn.Module):
                     scale_assignment, predicted_scales = self.scale_net(filtered_points, self.training)
             else:
                 scale_assignment, predicted_scales = self.scale_net(filtered_points, self.training)
+            
+            # 🎓 PhD RESEARCH: Log learnable voxel scale parameters during training
+            if self.training and torch.rand(1).item() < 0.02:  # Log 2% of batches
+                current_scales = self.scale_net.voxel_scales.detach()
+                scale_gradients = self.scale_net.voxel_scales.grad
+                print(f"🎯 LEARNABLE SCALES: {[f'{s:.4f}m' for s in current_scales.tolist()]}")
+                if scale_gradients is not None:
+                    print(f"📈 Scale gradients: {[f'{g:.6f}' for g in scale_gradients.tolist()]}")
+                print(f"📊 Predicted scale range: {predicted_scales.min():.4f}m - {predicted_scales.max():.4f}m")
             
             # 🚀 STEP 3: Memory-efficient multi-scale voxelization
             multi_scale_voxels = self.multi_scale_voxelizer(filtered_points, scale_assignment)
