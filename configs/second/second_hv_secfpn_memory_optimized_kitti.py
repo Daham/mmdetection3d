@@ -1,7 +1,7 @@
 _base_ = [
     '../_base_/models/second_hv_secfpn_kitti.py',
     '../_base_/datasets/kitti-3d-car.py', 
-    '../_base_/schedules/cyclic-2e.py',
+    '../_base_/schedules/cyclic-20e.py',
     '../_base_/default_runtime.py'
 ]
 

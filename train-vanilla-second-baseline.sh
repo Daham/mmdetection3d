@@ -1,15 +1,21 @@
 #!/bin/bash
 
-echo "===================================================================================="
-echo "PhD RESEARCH BENCHMARK: Training Vanilla SECOND Baseline"
-echo "===================================================================================="
-echo "Purpose: Establish baseline performance for comparison with adaptive voxelization"
-echo "Configuration: Standard SECOND with fixed voxel size (0.05, 0.05, 0.1)"
-echo "Expected Performance: ~0.5-1.0s/iter (typical SECOND performance)"
-echo ""
+# PhD Research Training Script - Vanilla SECOND Baseline
+# Standard SECOND implementation for comparison
+# Author: Daham
 
-# Set working directory
-cd /home/daham/mmdetection_project/mmdetection3d
+echo "🎯 Starting PhD Research Training - Vanilla SECOND Baseline"
+echo "📊 Model: Standard SECOND"
+echo "🗂️  Dataset: KITTI"
+echo "⚡ Features: Original SECOND VFE, standard voxelization"
+echo "============================================================"
+
+# Activate virtual environment
+source /home/daham/mmdetection_project/mmdet_env/bin/activate
+
+# Clean any previous cache
+find . -name "*.pyc" -delete
+find . -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
 
 # Clean previous baseline results
 if [ -d "./work_dirs/vanilla_second_baseline" ]; then
@@ -17,7 +23,11 @@ if [ -d "./work_dirs/vanilla_second_baseline" ]; then
     rm -rf ./work_dirs/vanilla_second_baseline
 fi
 
-echo "Starting vanilla SECOND baseline training..."
+# Start training with vanilla SECOND implementation
+python tools/train.py configs/second/second_vanilla_baseline_kitti.py
+
+echo "============================================================"
+echo "🎓 PhD Research Training Complete - Vanilla SECOND Baseline"
 echo "Configuration: configs/vanilla_second_baseline.py"
 echo ""
 
