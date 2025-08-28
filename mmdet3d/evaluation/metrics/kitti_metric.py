@@ -126,6 +126,8 @@ class KittiMetric(BaseMetric):
                     }
                     for instance in annos['instances']:
                         label = instance['bbox_label']
+                        if label == -1:
+                            continue  # Skip invalid/ignore label
                         kitti_annos['name'].append(label2cat[label])
                         kitti_annos['truncated'].append(instance['truncated'])
                         kitti_annos['occluded'].append(instance['occluded'])

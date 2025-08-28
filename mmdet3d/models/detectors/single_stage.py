@@ -71,7 +71,7 @@ class SingleStage3DDetector(Base3DDetector):
         Returns:
             dict: A dictionary of loss components.
         """
-        x = self.extract_feat(batch_inputs_dict)
+        x = self.extract_feat(batch_inputs_dict, batch_data_samples)
         losses = self.bbox_head.loss(x, batch_data_samples, **kwargs)
         return losses
 
@@ -106,7 +106,10 @@ class SingleStage3DDetector(Base3DDetector):
                 - bboxes_3d (Tensor): Contains a tensor with shape
                     (num_instances, C) where C >=7.
         """
-        x = self.extract_feat(batch_inputs_dict)
+        if batch_data_samples is not None:
+            x = self.extract_feat(batch_inputs_dict, batch_data_samples)
+        else:
+            x = self.extract_feat(batch_inputs_dict)
         results_list = self.bbox_head.predict(x, batch_data_samples, **kwargs)
         predictions = self.add_pred_to_datasample(batch_data_samples,
                                                   results_list)
@@ -138,7 +141,7 @@ class SingleStage3DDetector(Base3DDetector):
         return results
 
     def extract_feat(
-        self, batch_inputs_dict: Dict[str, Tensor]
+        self, batch_inputs_dict: Dict[str, Tensor],batch_data_samples=None
     ) -> Union[Tuple[torch.Tensor], Dict[str, Tensor]]:
         """Directly extract features from the backbone+neck.
 
@@ -161,3 +164,5 @@ class SingleStage3DDetector(Base3DDetector):
         if self.with_neck:
             x = self.neck(x)
         return x
+
+

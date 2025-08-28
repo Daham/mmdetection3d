@@ -12,7 +12,7 @@ default_scope = 'mmdet3d'
 
 default_hooks = dict(
     timer=dict(type=IterTimerHook),
-    logger=dict(type=LoggerHook, interval=50),
+    logger=dict(type=LoggerHook, interval=5),
     param_scheduler=dict(type=ParamSchedulerHook),
     checkpoint=dict(type=CheckpointHook, interval=-1),
     sampler_seed=dict(type=DistSamplerSeedHook),
@@ -24,7 +24,13 @@ env_cfg = dict(
     dist_cfg=dict(backend='nccl'),
 )
 
-log_processor = dict(type=LogProcessor, window_size=50, by_epoch=True)
+# log_processor = dict(type=LogProcessor, window_size=50, by_epoch=True)
+
+log_processor = dict(
+    type='mmdet3d.engine.custom_log_processor.CustomLogProcessor',
+    window_size=50,
+    by_epoch=True
+)
 
 log_level = 'INFO'
 load_from = None
