@@ -1252,6 +1252,10 @@ class MemoryOptimizedImportanceGuidedMultiScaleVFE(nn.Module):
                  norm_cfg: dict = dict(type='BN1d', eps=1e-3, momentum=0.01),
                  init_cfg: OptConfigType = None,
                  
+                 # 🎓 PhD RESEARCH: Point Refinement Enhancement (OPTIONAL)
+                 enable_point_refinement: bool = False,  # Toggle on/off easily
+                 point_refinement_neighbors: int = 8,    # Small for efficiency
+                 
                  # Legacy parameters (ignored but accepted for compatibility)
                  **kwargs):
         super().__init__()
@@ -1367,6 +1371,13 @@ class MemoryOptimizedImportanceGuidedMultiScaleVFE(nn.Module):
             output_channels=output_channels,
             use_checkpoint=self.use_gradient_checkpointing
         )
+        
+        # 🎓 PhD RESEARCH: Optional Point Refinement Enhancement
+        self.point_refinement = LightweightPointRefinementModule(
+            feature_channels=output_channels,
+            num_neighbors=point_refinement_neighbors,
+            enabled=enable_point_refinement
+        ) if enable_point_refinement else None
         
         # Output configuration
         self.output_channels = output_channels + 1  # +1 for scale info
@@ -1485,6 +1496,13 @@ class MemoryOptimizedImportanceGuidedMultiScaleVFE(nn.Module):
             
             # 🚀 STEP 5: Memory-efficient feature fusion
             fused_features = self.feature_fusion(multi_scale_features)
+            
+            # 🎓 PhD RESEARCH: Optional Point Refinement Enhancement
+            if self.point_refinement is not None:
+                # Extract point coordinates from filtered points for refinement
+                point_coords = filtered_points[:, :3]  # x, y, z coordinates
+                # Apply point refinement using learned scales
+                fused_features = self.point_refinement(point_coords, fused_features, predicted_scales)
             
             # 🚀 STEP 6: Prepare output with minimal memory overhead
             # Use mean scale instead of computing per-point scales
@@ -1860,5 +1878,116 @@ __all__ = [
     'MultiScaleVoxelizer', 
     'ScaleSpecificVFE', 
     'RefactoredMultiScaleFeatureFusion',
-    'LightweightPointImportanceNet'
+    'LightweightPointImportanceNet',
+    'LightweightPointRefinementModule'
 ]
+
+
+# 🎓 PhD RESEARCH ENHANCEMENT: Lightweight Point Refinement
+class LightweightPointRefinementModule(nn.Module):
+    """
+    🚀 MINIMAL-IMPACT ENHANCEMENT: Scale-Aware Point Refinement
+    
+    Uses learnable voxel scale parameters for adaptive point-level processing.
+    Designed for easy integration with existing VFE without major code changes.
+    
+    Features:
+    - Toggle on/off with single parameter
+    - Minimal computational overhead
+    - Uses existing predicted scales
+    - No changes to main pipeline
+    """
+    
+    def __init__(self,
+                 feature_channels: int = 64,
+                 num_neighbors: int = 8,  # Small for efficiency
+                 scale_multiplier: float = 2.0,  # Conservative multiplier
+                 enabled: bool = True):  # Easy toggle
+        super().__init__()
+        
+        self.enabled = enabled
+        self.num_neighbors = num_neighbors
+        self.scale_multiplier = scale_multiplier
+        
+        if not self.enabled:
+            return  # No initialization if disabled
+            
+        # Lightweight point processing
+        self.point_conv = nn.Sequential(
+            nn.Conv1d(feature_channels + 3, feature_channels, 1),  # +3 for relative coords
+            nn.BatchNorm1d(feature_channels),
+            nn.ReLU(inplace=True),
+            nn.Conv1d(feature_channels, feature_channels, 1)
+        )
+        
+        # Simple feature fusion
+        self.fusion = nn.Sequential(
+            nn.Linear(feature_channels * 2, feature_channels),
+            nn.ReLU(inplace=True)
+        )
+        
+        print(f"🎯 LightweightPointRefinement: {'ENABLED' if enabled else 'DISABLED'}")
+    
+    def forward(self, 
+                points: torch.Tensor,           # (N, 3) 
+                features: torch.Tensor,        # (N, C)
+                predicted_scales: torch.Tensor # (N,)
+                ) -> torch.Tensor:
+        """Lightweight point refinement with minimal overhead."""
+        
+        if not self.enabled:
+            return features  # Pass-through if disabled
+            
+        N, C = features.shape
+        device = features.device
+        
+        # Simple distance-based neighbor finding
+        distances = torch.cdist(points, points, p=2)  # (N, N)
+        
+        # Use predicted scales as adaptive radii
+        adaptive_radii = predicted_scales * self.scale_multiplier  # (N,)
+        radius_matrix = adaptive_radii.unsqueeze(1)  # (N, 1)
+        
+        # Get neighbors within adaptive radius
+        neighbor_mask = distances <= radius_matrix  # (N, N)
+        
+        refined_features = []
+        for i in range(N):
+            # Get neighbors for point i
+            valid_neighbors = torch.where(neighbor_mask[i])[0]
+            
+            # Limit to k nearest neighbors for efficiency
+            if len(valid_neighbors) > self.num_neighbors:
+                neighbor_distances = distances[i, valid_neighbors]
+                _, top_k_idx = torch.topk(neighbor_distances, self.num_neighbors, largest=False)
+                valid_neighbors = valid_neighbors[top_k_idx]
+            
+            # Fallback to k-nearest if too few neighbors
+            if len(valid_neighbors) < 3:
+                _, valid_neighbors = torch.topk(distances[i], min(self.num_neighbors, N), largest=False)
+            
+            # Extract neighbor features and coordinates
+            neighbor_points = points[valid_neighbors]  # (K, 3)
+            neighbor_features = features[valid_neighbors]  # (K, C)
+            
+            # Relative coordinates
+            center_point = points[i:i+1]  # (1, 3)
+            relative_coords = neighbor_points - center_point  # (K, 3)
+            
+            # Combine features with relative coordinates
+            combined = torch.cat([neighbor_features.T, relative_coords.T], dim=0)  # (C+3, K)
+            combined = combined.unsqueeze(0)  # (1, C+3, K)
+            
+            # Apply point convolution
+            refined = self.point_conv(combined)  # (1, C, K)
+            refined = torch.max(refined, dim=2)[0].squeeze(0)  # (C,)
+            
+            refined_features.append(refined)
+        
+        refined_features = torch.stack(refined_features, dim=0)  # (N, C)
+        
+        # Fuse original and refined features
+        combined = torch.cat([features, refined_features], dim=1)  # (N, 2C)
+        final_features = self.fusion(combined)  # (N, C)
+        
+        return final_features
