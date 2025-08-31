@@ -67,9 +67,15 @@ $$S^* = \arg\min_{S} \mathcal{L}_{detection}(f_{detect}(f_{voxel}(P, S)), Y)$$
 
 where $f_{voxel}$ is the voxelization function, $f_{detect}$ is the detection network, $Y$ are ground truth labels, and $\mathcal{L}_{detection}$ is the detection loss.
 
-### 3.2 Learnable Voxel Scale Parameters
+### 3.2 Comprehensive Analysis of Limitations and Our Approach
 
-#### 3.2.1 Scale Parameterization
+Through extensive analysis of existing 3D object detection pipelines, we identified three fundamental limitations that severely constrain performance: **(1) Scale Rigidity** - current methods employ fixed voxel sizes (typically 0.05m-0.2m) determined through exhaustive grid search, making them inherently suboptimal for scenes containing objects at vastly different scales; **(2) Spatial Uniformity** - uniform voxelization treats all spatial regions equally, despite the fact that object boundaries require fine-grained detail while background regions could benefit from computational efficiency through coarser representation; and **(3) Manual Optimization** - the scale selection process relies entirely on human expertise and dataset-specific tuning, preventing generalization across different domains and limiting scalability to new scenarios.
+
+Our methodology directly addresses these limitations through a principled approach that transforms the voxelization process from a static preprocessing step into an adaptive, learnable component of the neural network. **Core Innovation 1**: We parameterize voxel scales as `nn.Parameter` objects that are jointly optimized with detection objectives through standard backpropagation, enabling the network to discover optimal scales for different spatial contexts. **Core Innovation 2**: We introduce a novel importance-guided filtering mechanism that dynamically identifies critical spatial regions and assigns appropriate processing granularity, moving beyond uniform spatial treatment. **Core Innovation 3**: We develop a memory-optimized multi-scale voxel feature encoder (MemoryOptimizedImportanceGuidedMultiScaleVFE) that efficiently processes multiple learned scales in parallel while maintaining computational feasibility through gradient checkpointing and adaptive memory management. **Core Innovation 4**: Our approach incorporates differentiable scale assignment using Gumbel-Softmax, allowing point-wise scale predictions while maintaining end-to-end differentiability essential for gradient-based optimization. This comprehensive methodology not only overcomes the inherent limitations of fixed-scale approaches but also establishes a new paradigm where voxelization parameters become an integral part of the learning process, enabling automatic discovery of optimal spatial representations that adapt to both local point cloud characteristics and global detection objectives.
+
+### 3.3 Learnable Voxel Scale Parameters
+
+#### 3.3.1 Scale Parameterization
 
 We parameterize voxel scales as learnable parameters:
 
@@ -83,7 +89,7 @@ initial_scales = torch.tensor([0.05, 0.1, 0.2])
 self.voxel_scales = nn.Parameter(initial_scales, requires_grad=True)
 ```
 
-#### 3.2.2 Scale Initialization
+#### 3.3.2 Scale Initialization
 
 We initialize scales using logarithmic spacing for optimal coverage:
 
@@ -91,7 +97,7 @@ $$s_k = s_{min} \cdot \exp\left(\frac{k-1}{K-1} \ln\left(\frac{s_{max}}{s_{min}}
 
 where $s_{min} = 0.01m$, $s_{max} = 1.0m$, and $K$ is the number of scales.
 
-#### 3.2.3 Scale Regularization
+#### 3.3.3 Scale Regularization
 
 To ensure stable training and meaningful scales, we apply regularization:
 
@@ -99,9 +105,9 @@ $$\mathcal{L}_{reg} = \lambda_1 \sum_{k=1}^K \max(0, \epsilon - s_k) + \lambda_2
 
 where the first two terms enforce scale bounds and the third encourages scale diversity.
 
-### 3.3 Adaptive Scale Selection Network
+### 3.4 Adaptive Scale Selection Network
 
-#### 3.3.1 Point-wise Scale Prediction
+#### 3.4.1 Point-wise Scale Prediction
 
 We employ a lightweight network $f_{scale}$ to predict optimal scale assignments for each point:
 
@@ -109,7 +115,7 @@ $$\alpha_i = f_{scale}(p_i) \in \mathbb{R}^K$$
 
 where $\alpha_i$ represents logits for scale selection at point $p_i$.
 
-#### 3.3.2 Differentiable Scale Assignment
+#### 3.4.2 Differentiable Scale Assignment
 
 For differentiable training, we use Gumbel-Softmax:
 
@@ -117,15 +123,15 @@ $$w_{i,k} = \frac{\exp((\alpha_{i,k} + g_{i,k})/\tau)}{\sum_{j=1}^K \exp((\alpha
 
 where $g_{i,k} \sim \text{Gumbel}(0,1)$ and $\tau$ is the temperature parameter.
 
-#### 3.3.3 Scale Integration
+#### 3.4.3 Scale Integration
 
 The effective scale for point $p_i$ is computed as:
 
 $$s_i^{eff} = \sum_{k=1}^K w_{i,k} \cdot s_k^*$$
 
-### 3.4 Memory-Optimized Multi-Scale Voxel Feature Encoder
+### 3.5 Memory-Optimized Multi-Scale Voxel Feature Encoder
 
-#### 3.4.1 Architecture Overview
+#### 3.5.1 Architecture Overview
 
 Our encoder consists of:
 1. **Importance-guided point filtering** for memory efficiency
@@ -134,7 +140,7 @@ Our encoder consists of:
 4. **Scale-specific feature extraction** with shared parameters
 5. **Adaptive feature fusion** based on scale assignments
 
-#### 3.4.2 Importance-Guided Point Filtering
+#### 3.5.2 Importance-Guided Point Filtering
 
 To handle large point clouds efficiently, we predict point importance:
 
@@ -142,7 +148,7 @@ $$I_i = \sigma(f_{importance}(p_i))$$
 
 and retain only points with $I_i > \theta$ where $\theta$ is the importance threshold.
 
-#### 3.4.3 Multi-Scale Voxelization Process
+#### 3.5.3 Multi-Scale Voxelization Process
 
 For each scale $s_k^*$, we perform voxelization:
 
@@ -150,7 +156,7 @@ $$V_k = \text{Voxelize}(P_{filtered}, s_k^*)$$
 
 where $V_k$ contains voxels and their associated point features.
 
-#### 3.4.4 Scale-Specific Feature Extraction
+#### 3.5.4 Scale-Specific Feature Extraction
 
 Each scale uses a dedicated VFE (Voxel Feature Encoder):
 
@@ -158,7 +164,7 @@ $$F_k = \text{VFE}_k(V_k)$$
 
 with shared architectural parameters but scale-specific processing.
 
-#### 3.4.5 Adaptive Feature Fusion
+#### 3.5.5 Adaptive Feature Fusion
 
 Features are fused using learned scale assignments:
 
@@ -166,22 +172,22 @@ $$F_{fused} = \sum_{k=1}^K \bar{w}_k \cdot F_k$$
 
 where $\bar{w}_k$ are aggregated scale weights.
 
-### 3.5 Training Procedure
+### 3.6 Training Procedure
 
-#### 3.5.1 Loss Function
+#### 3.6.1 Loss Function
 
 The total loss combines detection and regularization terms:
 
 $$\mathcal{L}_{total} = \mathcal{L}_{detection} + \lambda \mathcal{L}_{reg}$$
 
-#### 3.5.2 Optimization
+#### 3.6.2 Optimization
 
 We use AdamW optimizer with OneCycleLR scheduling:
 - Learning rate: 3e-3
 - Weight decay: 1e-2  
 - Temperature scheduling: $\tau(t) = \tau_0 \cdot \gamma^t$
 
-#### 3.5.3 Gradient Flow
+#### 3.6.3 Gradient Flow
 
 Critical for learning is ensuring gradient flow to scale parameters:
 
@@ -190,16 +196,16 @@ detection_loss.backward()  # Gradients flow to voxel_scales
 optimizer.step()          # Updates learnable scales
 ```
 
-### 3.6 Implementation Details
+### 3.7 Implementation Details
 
-#### 3.6.1 Memory Optimization
+#### 3.7.1 Memory Optimization
 
 - **Gradient checkpointing** for memory-compute trade-off
 - **Adaptive voxel limits** based on scene complexity
 - **Efficient tensor operations** with in-place updates
 - **Point filtering** to reduce computational load
 
-#### 3.6.2 Numerical Stability
+#### 3.7.2 Numerical Stability
 
 - **Scale clamping** to prevent extreme values
 - **Gradient clipping** for stable training
