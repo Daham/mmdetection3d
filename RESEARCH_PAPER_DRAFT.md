@@ -216,36 +216,37 @@ optimizer.step()          # Updates learnable scales
 
 ## 4. Experimental Setup
 
-### 4.1 Dataset and Evaluation
+### 4.1 Dataset and Experimental Protocol
 
-**Dataset**: KITTI 3D Object Detection benchmark [27]
-- **Training**: 3,712 samples with 3D bounding box annotations
-- **Validation**: 3,769 samples for evaluation
-- **Classes**: Car detection (primary focus)
-- **Metrics**: Average Precision (AP) at IoU thresholds 0.5, 0.7
+We conduct comprehensive experiments on the widely-adopted KITTI 3D Object Detection benchmark [27], which provides a challenging real-world evaluation environment for autonomous driving scenarios. The KITTI dataset contains LiDAR point cloud data captured from urban, highway, and rural driving scenarios with varying object densities and environmental conditions. Our experimental protocol follows the standard KITTI evaluation scheme with a training set comprising 3,712 meticulously annotated samples containing 3D bounding box annotations for multiple object classes, and a validation set of 3,769 samples used for performance evaluation and hyperparameter tuning.
 
-### 4.2 Implementation Framework
+To ensure focused evaluation of our adaptive voxelization approach, we concentrate primarily on car detection as the target class, which represents the most prevalent and challenging object category in autonomous driving applications. This choice allows for detailed analysis of how learned voxel scales adapt to objects of varying sizes (compact cars vs. large vehicles) and spatial contexts (isolated vehicles vs. dense traffic scenarios). Our evaluation employs Average Precision (AP) metrics computed at multiple Intersection over Union (IoU) thresholds (0.5 and 0.7) following standard 3D object detection protocols, providing robust assessment of both localization accuracy and detection recall across different precision requirements.
 
-- **Base Framework**: MMDetection3D [28]
-- **Base Model**: SECOND [5] with sparse convolutions
-- **Hardware**: NVIDIA GPU with 24GB memory
-- **Training Time**: ~4 hours for 5 epochs
+### 4.2 Implementation Framework and Computational Environment
 
-### 4.3 Baseline Methods
+Our implementation leverages the MMDetection3D framework [28], a comprehensive and extensible platform for 3D object detection research that provides standardized implementations of state-of-the-art methods and evaluation protocols. We build upon the SECOND [5] architecture as our base detector, which employs sparse 3D convolutions for efficient processing of voxelized point clouds. This choice provides a strong foundation for evaluating the impact of our learnable voxelization approach while maintaining compatibility with established sparse convolution operations.
 
-1. **Fixed Single Scale**: Original SECOND with 0.1m voxels
-2. **Fixed Multi-Scale**: Manual scales [0.05, 0.1, 0.2]m
-3. **Random Scale Selection**: Non-learned scale assignment
-4. **Single Learnable Scale**: One global learnable parameter
+The experimental infrastructure consists of NVIDIA GPUs with 24GB memory capacity, enabling efficient training of our memory-optimized architecture while accommodating the computational demands of multi-scale voxel processing. All experiments are conducted using mixed-precision training with automatic mixed precision (AMP) to maximize GPU utilization and enable larger batch sizes. Our training protocol employs a compact 5-epoch schedule specifically designed for adaptive voxelization research, with each epoch requiring approximately 50 minutes, resulting in total training time of approximately 4 hours per experiment. This efficient training schedule enables extensive ablation studies and hyperparameter exploration while maintaining research productivity.
 
-### 4.4 Hyperparameters
+### 4.3 Baseline Methods and Comparative Analysis
 
-- **Number of scales**: K = 3
-- **Initial scales**: [0.05, 0.1, 0.2]m
-- **Temperature**: τ₀ = 1.0, γ = 0.9995
-- **Regularization weights**: λ₁ = λ₂ = 0.01, λ₃ = 0.001
-- **Importance threshold**: θ = 0.1
-- **Memory optimization**: Level 2 (aggressive)
+To demonstrate the effectiveness of our learnable voxelization approach, we establish a comprehensive set of baseline methods that systematically evaluate different aspects of scale selection and multi-scale processing:
+
+**Fixed Single Scale Baseline**: We implement the original SECOND detector with a fixed voxel size of 0.1m, representing the standard approach used in most existing 3D detection methods. This baseline establishes the performance ceiling achievable with manually-tuned single-scale voxelization and provides a direct comparison point for evaluating the benefits of adaptive scale learning.
+
+**Fixed Multi-Scale Baseline**: To isolate the impact of learnable scales from multi-scale processing benefits, we implement a fixed multi-scale variant using manually-selected scales of [0.05, 0.1, 0.2]m. This baseline processes point clouds at multiple predefined resolutions and fuses the resulting features, enabling assessment of whether performance improvements stem from multi-scale processing or the adaptive learning mechanism.
+
+**Random Scale Selection**: We develop a control experiment with random scale assignment to verify that performance gains result from learned scale optimization rather than increased model complexity. This baseline randomly assigns points to different scale pathways during training and inference, maintaining architectural complexity while eliminating adaptive learning.
+
+**Single Learnable Scale**: To evaluate the contribution of multi-scale learning versus learnable parameterization, we implement a variant with a single globally learnable voxel scale parameter. This ablation isolates the impact of making scales learnable while maintaining single-scale processing, helping distinguish between the benefits of adaptive parameterization and multi-scale architecture.
+
+### 4.4 Hyperparameter Configuration and Training Protocol
+
+Our experimental design employs carefully tuned hyperparameters optimized through preliminary experiments and principled initialization strategies. The learnable voxelization module utilizes K = 3 distinct scale parameters, providing sufficient scale diversity while maintaining computational efficiency. Initial scale values are set to [0.05, 0.1, 0.2]m using logarithmic spacing to ensure optimal coverage of the scale spectrum relevant for automotive scenes.
+
+The differentiable scale assignment mechanism employs Gumbel-Softmax with initial temperature τ₀ = 1.0 and exponential annealing schedule with decay factor γ = 0.9995, enabling gradual transition from exploration to exploitation during the learning process. Scale regularization weights are configured as λ₁ = λ₂ = 0.01 for boundary enforcement and λ₃ = 0.001 for diversity promotion, balancing scale stability with adaptive learning capacity.
+
+Memory optimization operates at Level 2 (aggressive) settings, employing gradient checkpointing, adaptive batch sizing, and efficient tensor operations to enable training within GPU memory constraints. The importance-guided filtering mechanism uses threshold θ = 0.1 to retain approximately 80-90% of input points while filtering computationally expensive outliers and noise. Training employs AdamW optimizer with learning rate 3e-3, weight decay 1e-2, and OneCycleLR scheduling to ensure stable convergence of both detection and voxelization parameters.
 
 ---
 
