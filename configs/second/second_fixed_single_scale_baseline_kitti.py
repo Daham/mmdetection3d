@@ -5,23 +5,15 @@ _base_ = [
     '../_base_/default_runtime.py'
 ]
 
-voxel_size = [0.1, 0.1, 0.2]  # Base scale for adaptive voxelization (matching paper)
+voxel_size = [0.1, 0.1, 0.2]  # Fixed single scale: 0.1m (matching paper claims)
 point_cloud_range = [0, -40, -3, 70.4, 40, 1]
 data_root = '/home/daham/mmdetection_project/dataset/KITTI/'
 
-# Override the voxel encoder to use memory-optimized importance-guided multi-scale VFE
+# Standard SECOND configuration with vanilla HardSimpleVFE
 model = dict(
     voxel_encoder=dict(
-        type='MemoryOptimizedImportanceGuidedMultiScaleVFE',
-        in_channels=4,
-        output_channels=3,  # Will become 4 with +1 for scale info, matching SparseEncoder expectation
-        point_cloud_range=point_cloud_range,
-        voxel_size=voxel_size,
-        memory_optimization_level=2,  # Level 2: aggressive optimization
-        use_gradient_checkpointing=True,  # Memory optimization
-        importance_threshold=0.1,
-        vfe_channels=[16, 32],  # Reduced channels for memory efficiency
-        fusion_channels=32,     # Reduced from default 64
+        type='HardSimpleVFE',
+        num_features=4
     ),
     bbox_head=dict(
         num_classes=1,
@@ -46,7 +38,7 @@ model = dict(
         pos_weight=-1,
         debug=False))
 
-# Optimizer and training configuration (matching paper claims)
+# Standard optimizer configuration (matching paper: lr=3×10^-3)
 optim_wrapper = dict(
     type='AmpOptimWrapper',  # Mixed precision training
     optimizer=dict(type='AdamW', lr=0.003, weight_decay=0.01),  # 3×10^-3 as stated in paper
