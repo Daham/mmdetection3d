@@ -5,28 +5,34 @@ _base_ = [
     '../_base_/default_runtime.py'
 ]
 
-# Fixed Multi-Scale Baseline: [0.05, 0.1, 0.2] m fixed scales fused before detection
-voxel_size = [0.1, 0.1, 0.2]  # Primary scale (medium resolution)
+voxel_size = [0.1, 0.1, 0.2]  # Base scale for multi-scale (matching paper)
 point_cloud_range = [0, -40, -3, 70.4, 40, 1]
 data_root = '/home/daham/mmdetection_project/dataset/KITTI/'
 
-# Multi-resolution voxelization with [0.05, 0.1, 0.2] m fixed scales
-# This isolates multi-scale benefits from learnable scales
+# Fixed Multi-Scale Baseline: [0.05, 0.1, 0.2]m fixed scales fused before detection
 model = dict(
-    data_preprocessor=dict(
-        type='Det3DDataPreprocessor',
-        voxel=True,
-        voxel_layer=dict(
-            max_num_points=5,
-            point_cloud_range=point_cloud_range,
-            voxel_size=[0.1, 0.1, 0.2],  # Primary voxel size (medium scale)
-            max_voxels=(16000, 40000))),
     voxel_encoder=dict(
-        type='HardSimpleVFE',  # Using standard VFE, multi-scale handled in preprocessing
-        num_features=4
-        # Note: In a complete implementation, this would be a custom multi-scale VFE
-        # that processes [0.05, 0.1, 0.2]m scales and fuses features before detection
+        type='FixedMultiScaleVFE',
+        voxel_scales=[0.05, 0.1, 0.2],  # Fixed scales exactly as described in paper
+        max_num_points=5,
+        max_voxels=(12000, 30000),
+        point_cloud_range=point_cloud_range,
+        vfe_channels=[32, 64],
+        fusion_channels=128,
+        output_channels=64,
+        with_distance=True,
+        with_cluster_center=True,
+        with_voxel_center=True
     ),
+    middle_encoder=dict(
+        type='SparseEncoder',
+        in_channels=64,  # Match our VFE output channels
+        sparse_shape=[41, 1600, 1408],
+        order=('conv', 'norm', 'act'),
+        norm_cfg=dict(type='BN1d', eps=1e-3, momentum=0.01),
+        encoder_channels=((16, 16, 32), (32, 32, 64), (64, 64, 128), (128, 128)),
+        encoder_paddings=((0, 0, 1), (0, 0, 1), (0, 0, [0, 1, 1]), (0, 0)),
+        block_type='basicblock'),
     bbox_head=dict(
         num_classes=1,
         anchor_generator=dict(
@@ -38,7 +44,7 @@ model = dict(
             reshape_out=True)),
     train_cfg=dict(
         _delete_=True,
-        max_epochs=2,
+        max_epochs=5,
         assigner=dict(
             type='Max3DIoUAssigner',
             iou_calculator=dict(type='BboxOverlapsNearest3D'),
@@ -50,10 +56,10 @@ model = dict(
         pos_weight=-1,
         debug=False))
 
-# Optimizer configuration matching paper: lr=3×10^-3, weight_decay=1×10^-2
+# Standard optimizer configuration
 optim_wrapper = dict(
     type='AmpOptimWrapper',  # Mixed precision training
-    optimizer=dict(type='AdamW', lr=0.003, weight_decay=0.01),  # lr=3×10^-3
+    optimizer=dict(type='AdamW', lr=0.0002, weight_decay=0.01),
     clip_grad=dict(max_norm=10, norm_type=2)
 )
 
@@ -61,7 +67,7 @@ optim_wrapper = dict(
 train_cfg = dict(
     _delete_=True,  # Delete the base config
     type='EpochBasedTrainLoop',
-    max_epochs=2,
+    max_epochs=5,
     val_interval=1
 )
 

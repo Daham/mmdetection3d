@@ -39,7 +39,7 @@ model = dict(
             reshape_out=True)),
     train_cfg=dict(
         _delete_=True,
-        max_epochs=2,
+        max_epochs=5,
         assigner=dict(
             type='Max3DIoUAssigner',
             iou_calculator=dict(type='BboxOverlapsNearest3D'),
@@ -62,7 +62,7 @@ optim_wrapper = dict(
 train_cfg = dict(
     _delete_=True,  # Delete the base config
     type='EpochBasedTrainLoop',
-    max_epochs=2,
+    max_epochs=5,
     val_interval=1
 )
 

@@ -12,29 +12,16 @@ data_root = '/home/daham/mmdetection_project/dataset/KITTI/'
 # Override the voxel encoder to use memory-optimized importance-guided multi-scale VFE
 model = dict(
     voxel_encoder=dict(
-        type='ImportanceGuidedMultiScaleVFE',  # Use full version instead of memory-optimized
-        
-        # Multi-scale configuration
-        voxel_scales=[0.05, 0.1, 0.2],  # Research scales
-        num_scales=3,
-        
-        # CRITICAL FIX: Proper output channels (3+1=4 to match SparseEncoder)
-        output_channels=3,  # Will become 4 with +1 scale info
-        vfe_channels=[32, 64],  # Good internal capacity
-        fusion_channels=64,  # Reasonable fusion
-        
-        # Standard VFE parameters
-        max_num_points=5,
-        max_voxels=(16000, 40000),
+        type='MemoryOptimizedImportanceGuidedMultiScaleVFE',
+        in_channels=4,
+        output_channels=3,  # Will become 4 with +1 for scale info, matching SparseEncoder expectation
         point_cloud_range=point_cloud_range,
-        
-        # FIXED: Stable adaptive parameters
-        gumbel_temperature=0.5,  # Lower temperature for stable learning
-        continuous_mode=False,  # Discrete for stability
-        
-        # Disable aggressive optimizations for fair comparison
-        # memory_optimization_level=0,  # Full capacity
-        # use_gradient_checkpointing=False,  # No checkpointing
+        voxel_size=voxel_size,
+        memory_optimization_level=2,  # Level 2: aggressive optimization
+        use_gradient_checkpointing=True,  # Memory optimization
+        importance_threshold=0.1,
+        vfe_channels=[16, 32],  # Reduced channels for memory efficiency
+        fusion_channels=32,     # Reduced from default 64
     ),
     bbox_head=dict(
         num_classes=1,
@@ -47,7 +34,7 @@ model = dict(
             reshape_out=True)),
     train_cfg=dict(
         _delete_=True,
-        max_epochs=2,
+        max_epochs=5,
         assigner=dict(
             type='Max3DIoUAssigner',
             iou_calculator=dict(type='BboxOverlapsNearest3D'),
@@ -59,10 +46,10 @@ model = dict(
         pos_weight=-1,
         debug=False))
 
-# FIXED: Lower learning rate for complex adaptive components
+# Optimizer and training configuration (matching paper claims)
 optim_wrapper = dict(
     type='AmpOptimWrapper',  # Mixed precision training
-    optimizer=dict(type='AdamW', lr=0.001, weight_decay=0.01),  # Reduced from 0.003 for stability
+    optimizer=dict(type='AdamW', lr=0.003, weight_decay=0.01),  # 3×10^-3 as stated in paper
     clip_grad=dict(max_norm=10, norm_type=2)
 )
 
@@ -70,7 +57,7 @@ optim_wrapper = dict(
 train_cfg = dict(
     _delete_=True,  # Delete the base config
     type='EpochBasedTrainLoop',
-    max_epochs=2,
+    max_epochs=5,
     val_interval=1
 )
 

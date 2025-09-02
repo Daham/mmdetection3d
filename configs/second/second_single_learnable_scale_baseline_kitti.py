@@ -5,15 +5,27 @@ _base_ = [
     '../_base_/default_runtime.py'
 ]
 
-voxel_size = [0.1, 0.1, 0.2]  # Match adaptive config for fair comparison
+voxel_size = [0.5, 0.5, 0.5]
 point_cloud_range = [0, -40, -3, 70.4, 40, 1]
 data_root = '/home/daham/mmdetection_project/dataset/KITTI/'
 
-# Vanilla SECOND Baseline: Standard HardSimpleVFE for comparison with adaptive voxelization
+# Single Learnable Scale Baseline: One globally learnable voxel scale parameter
 model = dict(
     voxel_encoder=dict(
-        type='HardSimpleVFE',  # Standard SECOND VFE
-        num_features=4,  # Number of input features (x, y, z, intensity)
+        type='SingleLearnableScaleVFE',
+        in_channels=4,
+        output_channels=64,
+        # Single learnable scale parameter (initialized to 0.1m)
+        initial_scale=0.1,  # Initial scale value
+        scale_bounds=[0.05, 0.5],  # Min/max scale constraints
+        scale_regularization=0.01,  # L2 regularization on scale
+        vfe_channels=[16, 32],
+        point_cloud_range=point_cloud_range,
+        voxel_size=voxel_size,
+        # Isolates learnability vs multi-scale benefits
+        learnable=True,  # Enable scale learning
+        single_scale_only=True,  # Single scale processing
+        gradient_checkpointing=False,  # Simpler architecture
     ),
     bbox_head=dict(
         num_classes=1,
@@ -26,7 +38,7 @@ model = dict(
             reshape_out=True)),
     train_cfg=dict(
         _delete_=True,
-        max_epochs=2,
+        max_epochs=5,
         assigner=dict(
             type='Max3DIoUAssigner',
             iou_calculator=dict(type='BboxOverlapsNearest3D'),
@@ -38,10 +50,10 @@ model = dict(
         pos_weight=-1,
         debug=False))
 
-# Vanilla SECOND optimizer configuration (matching adaptive for fair comparison)
+# Standard optimizer configuration
 optim_wrapper = dict(
     type='AmpOptimWrapper',  # Mixed precision training
-    optimizer=dict(type='AdamW', lr=0.001, weight_decay=0.01),  # Match adaptive config lr
+    optimizer=dict(type='AdamW', lr=0.0002, weight_decay=0.01),
     clip_grad=dict(max_norm=10, norm_type=2)
 )
 
@@ -49,7 +61,7 @@ optim_wrapper = dict(
 train_cfg = dict(
     _delete_=True,  # Delete the base config
     type='EpochBasedTrainLoop',
-    max_epochs=2,
+    max_epochs=5,
     val_interval=1
 )
 
