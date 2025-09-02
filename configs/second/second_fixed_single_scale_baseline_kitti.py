@@ -5,7 +5,7 @@ _base_ = [
     '../_base_/default_runtime.py'
 ]
 
-voxel_size = [0.5, 0.5, 0.5]
+voxel_size = [0.1, 0.1, 0.2]  # Fixed single scale: 0.1m (matching paper claims)
 point_cloud_range = [0, -40, -3, 70.4, 40, 1]
 data_root = '/home/daham/mmdetection_project/dataset/KITTI/'
 
@@ -26,7 +26,7 @@ model = dict(
             reshape_out=True)),
     train_cfg=dict(
         _delete_=True,
-        max_epochs=5,
+        max_epochs=2,
         assigner=dict(
             type='Max3DIoUAssigner',
             iou_calculator=dict(type='BboxOverlapsNearest3D'),
@@ -38,10 +38,10 @@ model = dict(
         pos_weight=-1,
         debug=False))
 
-# Standard optimizer configuration (matching your memory-optimized version)
+# Standard optimizer configuration (matching paper: lr=3×10^-3)
 optim_wrapper = dict(
     type='AmpOptimWrapper',  # Mixed precision training
-    optimizer=dict(type='AdamW', lr=0.0002, weight_decay=0.01),
+    optimizer=dict(type='AdamW', lr=0.003, weight_decay=0.01),  # 3×10^-3 as stated in paper
     clip_grad=dict(max_norm=10, norm_type=2)
 )
 
@@ -49,7 +49,7 @@ optim_wrapper = dict(
 train_cfg = dict(
     _delete_=True,  # Delete the base config
     type='EpochBasedTrainLoop',
-    max_epochs=5,
+    max_epochs=2,
     val_interval=1
 )
 
