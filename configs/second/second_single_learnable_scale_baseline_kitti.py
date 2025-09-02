@@ -5,27 +5,23 @@ _base_ = [
     '../_base_/default_runtime.py'
 ]
 
-voxel_size = [0.5, 0.5, 0.5]
+voxel_size = [0.1, 0.1, 0.2]  # Same voxel size as other experiments
 point_cloud_range = [0, -40, -3, 70.4, 40, 1]
 data_root = '/home/daham/mmdetection_project/dataset/KITTI/'
 
-# Single Learnable Scale Baseline: One globally learnable voxel scale parameter
+# Fair Comparison Baseline: Same configuration as adaptive but with standard HardSimpleVFE
 model = dict(
+    data_preprocessor=dict(
+        type='Det3DDataPreprocessor',
+        voxel=True,
+        voxel_layer=dict(
+            max_num_points=5,
+            point_cloud_range=point_cloud_range,
+            voxel_size=voxel_size,
+            max_voxels=(16000, 40000))),
     voxel_encoder=dict(
-        type='SingleLearnableScaleVFE',
-        in_channels=4,
-        output_channels=64,
-        # Single learnable scale parameter (initialized to 0.1m)
-        initial_scale=0.1,  # Initial scale value
-        scale_bounds=[0.05, 0.5],  # Min/max scale constraints
-        scale_regularization=0.01,  # L2 regularization on scale
-        vfe_channels=[16, 32],
-        point_cloud_range=point_cloud_range,
-        voxel_size=voxel_size,
-        # Isolates learnability vs multi-scale benefits
-        learnable=True,  # Enable scale learning
-        single_scale_only=True,  # Single scale processing
-        gradient_checkpointing=False,  # Simpler architecture
+        type='HardSimpleVFE',  # Standard baseline VFE
+        num_features=4  # Standard output to match adaptive
     ),
     bbox_head=dict(
         num_classes=1,
@@ -50,10 +46,10 @@ model = dict(
         pos_weight=-1,
         debug=False))
 
-# Standard optimizer configuration
+# EXACT MATCH: Same optimizer configuration as adaptive experiment
 optim_wrapper = dict(
     type='AmpOptimWrapper',  # Mixed precision training
-    optimizer=dict(type='AdamW', lr=0.0002, weight_decay=0.01),
+    optimizer=dict(type='AdamW', lr=0.001, weight_decay=0.01),  # MATCH adaptive lr=0.001
     clip_grad=dict(max_norm=10, norm_type=2)
 )
 
