@@ -270,43 +270,84 @@ class FixedMultiScaleVoxelizer(nn.Module):
 @MODELS.register_module()
 class FixedMultiScaleFeatureFusion(nn.Module):
     """
-    Feature fusion module for fixed multi-scale features.
-    Concatenates features from all scales and applies fusion network.
+    Enhanced feature fusion with Gumbel-Softmax weighted combination.
+    
+    This isolates multi-scale benefits from learnable scales by:
+    1. Using FIXED scales [0.05, 0.1, 0.2]m (no scale learning)
+    2. Learning OPTIMAL FUSION weights per point/region (Gumbel-Softmax)
+    3. Differentiable weighted fusion instead of simple concatenation
+    
+    Research Insight: Tests if multi-scale benefits come from:
+    - Multiple resolutions themselves, OR
+    - Learnable scale selection
     """
     
     def __init__(self,
                  scale_channels: List[int] = [64, 64, 64],  # Channels from each scale
                  fusion_channels: int = 128,
-                 output_channels: int = 64):
+                 output_channels: int = 64,
+                 # Gumbel-Softmax parameters
+                 use_gumbel_fusion: bool = True,
+                 temperature: float = 2.0,
+                 temperature_decay: float = 0.995,
+                 min_temperature: float = 0.5):
         super().__init__()
         
         self.scale_channels = scale_channels
         self.num_scales = len(scale_channels)
-        total_channels = sum(scale_channels)
+        self.use_gumbel_fusion = use_gumbel_fusion
         
-        # Feature fusion network
-        self.fusion_net = nn.Sequential(
-            nn.Linear(total_channels, fusion_channels),
-            nn.LayerNorm(fusion_channels),  # LayerNorm for stability
-            nn.ReLU(inplace=True),
-            nn.Dropout(0.1),
-            nn.Linear(fusion_channels, fusion_channels // 2),
-            nn.LayerNorm(fusion_channels // 2),
-            nn.ReLU(inplace=True),
-            nn.Linear(fusion_channels // 2, output_channels)
-        )
-        
-        # Skip connection for gradient flow
-        self.skip_connection = nn.Linear(total_channels, output_channels) if total_channels != output_channels else nn.Identity()
+        if use_gumbel_fusion:
+            # Gumbel-Softmax weighted fusion
+            self.temperature = nn.Parameter(torch.tensor(temperature))
+            self.temperature_decay = temperature_decay
+            self.min_temperature = min_temperature
+            
+            # Scale weight predictor per voxel
+            self.scale_weight_net = nn.Sequential(
+                nn.Linear(4, 32),  # Point features → hidden
+                nn.LayerNorm(32),
+                nn.ReLU(inplace=True),
+                nn.Dropout(0.1),
+                nn.Linear(32, 16),
+                nn.LayerNorm(16), 
+                nn.ReLU(inplace=True),
+                nn.Linear(16, self.num_scales)  # → scale logits
+            )
+            
+            # Final projection - ensure float32 for numerical stability
+            self.final_projection = nn.Sequential(
+                nn.Linear(scale_channels[0], fusion_channels),  # Assume same channels per scale
+                nn.LayerNorm(fusion_channels),
+                nn.ReLU(inplace=True),
+                nn.Dropout(0.1),
+                nn.Linear(fusion_channels, output_channels)
+            ).float()  # Force float32 for stability
+        else:
+            # Traditional concatenation fusion (baseline)
+            total_channels = sum(scale_channels)
+            self.fusion_net = nn.Sequential(
+                nn.Linear(total_channels, fusion_channels),
+                nn.LayerNorm(fusion_channels),
+                nn.ReLU(inplace=True),
+                nn.Dropout(0.1),
+                nn.Linear(fusion_channels, fusion_channels // 2),
+                nn.LayerNorm(fusion_channels // 2),
+                nn.ReLU(inplace=True),
+                nn.Linear(fusion_channels // 2, output_channels)
+            )
+            self.skip_connection = nn.Linear(total_channels, output_channels) if total_channels != output_channels else nn.Identity()
         
         self.output_channels = output_channels
         
-    def forward(self, multi_scale_features: List[torch.Tensor]) -> torch.Tensor:
+    def forward(self, multi_scale_features: List[torch.Tensor], 
+                representative_points: torch.Tensor = None) -> torch.Tensor:
         """
         Fuse features from multiple fixed scales.
         
         Args:
             multi_scale_features: List of features from each scale
+            representative_points: (N, 4) - point features for weight prediction
             
         Returns:
             Fused features with shape (N, output_channels)
@@ -323,30 +364,79 @@ class FixedMultiScaleFeatureFusion(nn.Module):
                 reference_features = features
         
         if reference_features is None or max_voxels == 0:
-            # Return zero features if all scales are empty
             return torch.zeros(1, self.output_channels, device=device)
         
-        # Align all features to the reference size and concatenate
+        # Align all features to the reference size
         aligned_features = []
         
         for scale_id, features in enumerate(multi_scale_features):
             if features.numel() > 0 and features.shape[0] > 0:
-                # If this scale has fewer voxels, pad with zeros
                 if features.shape[0] < max_voxels:
                     padding = torch.zeros(max_voxels - features.shape[0], features.shape[1], device=device)
                     aligned = torch.cat([features, padding], dim=0)
                 elif features.shape[0] > max_voxels:
-                    # If this scale has more voxels, truncate
                     aligned = features[:max_voxels]
                 else:
                     aligned = features
                 aligned_features.append(aligned)
             else:
-                # Empty scale - add zero features
                 expected_channels = self.scale_channels[scale_id] if scale_id < len(self.scale_channels) else 64
                 zero_features = torch.zeros(max_voxels, expected_channels, device=device)
                 aligned_features.append(zero_features)
         
+        if self.use_gumbel_fusion and representative_points is not None:
+            # 🎯 GUMBEL-SOFTMAX WEIGHTED FUSION
+            return self._gumbel_weighted_fusion(aligned_features, representative_points[:max_voxels])
+        else:
+            # 📦 TRADITIONAL CONCATENATION FUSION  
+            return self._concatenation_fusion(aligned_features)
+    
+    def _gumbel_weighted_fusion(self, aligned_features: List[torch.Tensor], 
+                               points: torch.Tensor) -> torch.Tensor:
+        """
+        🎯 Gumbel-Softmax weighted fusion for learnable scale combination.
+        
+        Research Value: Isolates multi-scale benefits from adaptive scale selection.
+        """
+        device = points.device
+        dtype = aligned_features[0].dtype  # Use same dtype as features
+        batch_size = points.shape[0]
+        
+        # Ensure points have same dtype as features
+        points = points.to(dtype=dtype)
+        
+        # 1. Predict scale weights per voxel/point
+        scale_logits = self.scale_weight_net(points)  # (N, num_scales)
+        
+        # 2. Gumbel-Softmax for differentiable scale weights
+        if self.training:
+            # Soft weights during training for gradient flow
+            scale_weights = F.gumbel_softmax(
+                scale_logits, tau=self.temperature, hard=False, dim=-1
+            )  # (N, num_scales)
+        else:
+            # Hard weights during inference for efficiency
+            scale_weights = F.gumbel_softmax(
+                scale_logits, tau=self.temperature, hard=True, dim=-1
+            )
+        
+        # 3. Weighted combination of scale features
+        weighted_features = torch.zeros(batch_size, aligned_features[0].shape[1], 
+                                      device=device, dtype=dtype)
+        
+        for scale_id, scale_features in enumerate(aligned_features):
+            weight = scale_weights[:, scale_id:scale_id+1]  # (N, 1)
+            # Ensure same dtype
+            scale_features = scale_features.to(dtype=dtype)
+            weighted_features += weight * scale_features
+        
+        # 4. Final projection to output dimensions
+        fused_features = self.final_projection(weighted_features)
+        
+        return fused_features
+    
+    def _concatenation_fusion(self, aligned_features: List[torch.Tensor]) -> torch.Tensor:
+        """📦 Traditional concatenation-based fusion (baseline)."""
         # Concatenate along feature dimension
         concatenated = torch.cat(aligned_features, dim=-1)  # (N, total_channels)
         
@@ -356,6 +446,15 @@ class FixedMultiScaleFeatureFusion(nn.Module):
         fused_features = main_features + skip_features
         
         return fused_features
+    
+    def update_temperature(self):
+        """Update temperature for curriculum learning."""
+        if self.use_gumbel_fusion:
+            with torch.no_grad():
+                self.temperature.data = torch.clamp(
+                    self.temperature * self.temperature_decay,
+                    min=self.min_temperature
+                )
 
 
 @MODELS.register_module()
@@ -392,6 +491,12 @@ class FixedMultiScaleVFE(nn.Module):
                  with_distance: bool = True,
                  with_cluster_center: bool = True,
                  with_voxel_center: bool = True,
+                 
+                 # Gumbel-Softmax fusion parameters
+                 use_gumbel_fusion: bool = True,
+                 gumbel_temperature: float = 2.0,
+                 temperature_decay: float = 0.995,
+                 min_temperature: float = 0.5,
                  
                  init_cfg: OptConfigType = None,
                  **kwargs):
@@ -442,11 +547,20 @@ class FixedMultiScaleVFE(nn.Module):
         self.feature_fusion = FixedMultiScaleFeatureFusion(
             scale_channels=scale_channels,
             fusion_channels=fusion_channels,
-            output_channels=output_channels
+            output_channels=output_channels,
+            use_gumbel_fusion=use_gumbel_fusion,
+            temperature=gumbel_temperature,
+            temperature_decay=temperature_decay,
+            min_temperature=min_temperature
         )
         
-        # Output configuration
-        self.output_channels = output_channels + 1  # +1 for scale diversity info
+        fusion_mode = 'Gumbel-Softmax Weighted' if use_gumbel_fusion else 'Concatenation'
+        print(f"   🎯 Fusion mode: {fusion_mode}")
+        if use_gumbel_fusion:
+            print(f"   🌡️ Temperature: {gumbel_temperature:.2f} → {min_temperature:.2f} (decay: {temperature_decay:.4f})")
+        
+        # Output configuration  
+        self.output_channels = output_channels
     
     def forward(self, features: torch.Tensor, num_points: torch.Tensor = None, 
                 coors: torch.Tensor = None) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -495,10 +609,13 @@ class FixedMultiScaleVFE(nn.Module):
                     placeholder = torch.zeros(1, vfe.output_channels, device=device)
                     multi_scale_features.append(placeholder)
             
-            # 3. Feature fusion
-            fused_features = self.feature_fusion(multi_scale_features)
+            # 3. Gumbel-Softmax weighted feature fusion
+            fused_features = self.feature_fusion(
+                multi_scale_features, 
+                representative_points=points  # Pass points for Gumbel weight prediction
+            )
             
-            # 4. Use fused features directly (no additional channels for baseline)
+            # 4. Use fused features directly 
             output = fused_features
             
             # 5. Generate coordinates
@@ -544,8 +661,11 @@ class FixedMultiScaleVFE(nn.Module):
                     placeholder = torch.zeros(1, vfe.output_channels, device=device)
                     multi_scale_features.append(placeholder)
             
-            # Fuse features
-            fused_features = self.feature_fusion(multi_scale_features)
+            # Gumbel-Softmax weighted feature fusion
+            fused_features = self.feature_fusion(
+                multi_scale_features,
+                representative_points=representative_points  # Pass for Gumbel weight prediction
+            )
             
             # Align with input batch size
             if fused_features.shape[0] != batch_size:
