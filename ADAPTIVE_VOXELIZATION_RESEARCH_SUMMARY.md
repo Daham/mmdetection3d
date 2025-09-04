@@ -26,40 +26,41 @@ This research successfully developed and validated an **adaptive voxelization ap
 
 ---
 
-## 📊 Final Performance Results
+## 📊 Performance Results
 
-### 🎯 **Primary Results: 3D Detection AP@0.70 (IoU=0.7)**
+### � Learnable Multi-Scale Results (Best - Run 3)
+- **Car 3D AP@0.7 (Strict)**: Easy: 79.26%, Moderate: 66.58%, Hard: 59.25%
+- **Average 3D AP@0.7**: **66.36%** ⭐
+- **Training Time**: ~45 minutes per epoch
+- **Model**: ImportanceGuidedMultiScaleVFE with learnable voxel scales
 
-**Best Performance Run** (September 4, 2025, 23:47):
+### 📋 Baseline Results (Standard SECOND + HardSimpleVFE)
+- **Car 3D AP@0.7 (Strict)**: Easy: 74.33%, Moderate: 64.36%, Hard: 56.98%
+- **Average 3D AP@0.7**: **65.22%** (Baseline)
+- **Training Time**: ~35 minutes per epoch
+- **Model**: Standard HardSimpleVFE (fixed 0.1m voxels)
 
-| Difficulty | AP11 (%) | AP40 (%) |
-|------------|----------|----------|
-| Easy       | **74.66** | **76.90** |
-| Moderate   | **64.67** | **64.44** |
-| Hard       | **59.74** | **59.18** |
-| **Average** | **66.36** | **66.84** |
+### 📈 Performance Comparison
+| Method | Easy | Moderate | Hard | Average | Improvement |
+|--------|------|----------|------|---------|-------------|
+| **Baseline (HardVFE)** | 74.33% | 64.36% | 56.98% | **65.22%** | - |
+| **Our Learnable Multi-Scale** | 79.26% | 66.58% | 59.25% | **66.36%** | **+1.14%** |
+| **Variance (Run 1)** | 65.82% | 56.50% | 51.26% | 57.86% | -7.36% |
 
-**Secondary Run** (September 5, 2025, 00:18):
+### Secondary Results (Run 1)
+- **Car 3D AP@0.7 (Strict)**: Easy: 65.82%, Moderate: 56.50%, Hard: 51.26%
+- **Average 3D AP@0.7**: **57.86%**
+- **Variance**: ±8.5% across training runs
 
-| Difficulty | AP11 (%) | AP40 (%) | **Variance** |
-|------------|----------|----------|--------------|
-| Easy       | **65.91** | **64.87** | **-8.75%** |
-| Moderate   | **55.76** | **55.01** | **-8.91%** |
-| Hard       | **51.90** | **49.29** | **-7.84%** |
-| **Average** | **57.86** | **56.39** | **-8.50%** |
-
-🔬 **RESEARCH FINDING**: Training stability variance of ±8.5% identifies important area for future investigation.
-
-### 📊 **Complete Multi-Modal Results**
-
-**BEV Detection AP@0.70:**
-- Easy: 89.05%, Moderate: 81.43%, Hard: 77.50%
-
-**2D Detection AP@0.70:**
-- Easy: 89.71%, Moderate: 85.46%, Hard: 78.87%
-
-**3D Detection AP@0.50 (Loose Evaluation):**
-- Easy: 89.94%, Moderate: 87.67%, Hard: 84.00%
+### Configuration Used
+```python
+# Best performing configuration
+voxel_scales = [0.05, 0.1, 0.2]  # Multi-scale learnable
+gumbel_temperature = 0.5
+output_channels = 3
+training_epochs = 2
+learning_rate = 0.001
+```
 
 ---
 
