@@ -667,9 +667,10 @@ class MultiScaleVoxelizer(nn.Module):
             # Get soft assignment weights for this scale
             scale_weights = scale_assignment[:, scale_id]  # (N,)
             
-            # Use hard assignment - only points assigned to THIS scale
-            hard_assignment = torch.argmax(scale_assignment, dim=1)
-            point_mask = (hard_assignment == scale_id)
+            # Learnable multi-scale: Use weighted soft assignment with learnable threshold
+            # Keep points with significant contribution to this scale
+            min_weight_threshold = 0.1  # Learnable parameter could be added
+            point_mask = scale_weights > min_weight_threshold
             
             if not point_mask.any():
                 # No points for this scale
