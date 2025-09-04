@@ -667,8 +667,10 @@ class MultiScaleVoxelizer(nn.Module):
             # Get soft assignment weights for this scale
             scale_weights = scale_assignment[:, scale_id]  # (N,)
             
-            # Select points with non-zero weight for this scale
-            point_mask = scale_weights > 1e-6
+            # Use hard assignment - only points assigned to THIS scale
+            hard_assignment = torch.argmax(scale_assignment, dim=1)
+            point_mask = (hard_assignment == scale_id)
+            
             if not point_mask.any():
                 # No points for this scale
                 voxel_outputs.append({
