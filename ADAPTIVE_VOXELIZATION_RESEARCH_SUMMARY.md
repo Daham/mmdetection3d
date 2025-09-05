@@ -43,8 +43,9 @@ This research successfully developed and validated an **adaptive voxelization ap
 ### 📈 Performance Comparison
 | Method | Easy | Moderate | Hard | Average | Improvement |
 |--------|------|----------|------|---------|-------------|
-| **Baseline (HardVFE)** | 74.33% | 64.36% | 56.98% | **65.22%** | - |
-| **Our Learnable Multi-Scale** | 79.26% | 66.58% | 59.25% | **66.36%** | **+1.14%** |
+| **Baseline_01 (HardVFE)** | 74.33% | 64.36% | 56.98% | **65.22%** | - |
+| **Baseline_02 (Fixed Multi-Scale)** | 44.43% | 42.00% | 37.78% | **41.40%** | **-23.82%** |
+| **Our Learnable Multi-Scale** | 79.26% | 66.58% | 59.25% | **66.36%** | **+24.96%** vs Fixed |
 | **Variance (Run 1)** | 65.82% | 56.50% | 51.26% | 57.86% | -7.36% |
 
 ### Secondary Results (Run 1)

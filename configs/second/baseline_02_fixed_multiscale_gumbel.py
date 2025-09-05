@@ -9,30 +9,35 @@ voxel_size = [0.1, 0.1, 0.2]  # Base scale for multi-scale (matching paper)
 point_cloud_range = [0, -40, -3, 70.4, 40, 1]
 data_root = '/home/daham/mmdetection_project/dataset/KITTI/'
 
-# Fixed Multi-Scale Baseline with Gumbel-Softmax Weighted Fusion
-# Research Focus: Isolates multi-scale benefits from learnable scale selection
+# Fixed Multi-Scale Baseline using new FixedMultiScaleVFEBaseline
+# Research Focus: Same multi-scale architecture but with fixed (non-learnable) scale assignment
 model = dict(
     voxel_encoder=dict(
-        type='FixedMultiScaleVFE',
-        voxel_scales=[0.05, 0.1, 0.2],  # Fixed scales exactly as described in paper
-        max_num_points=3,  # Reduced from 5 to save memory
-        max_voxels=(8000, 20000),  # Reduced from (12000, 30000) to save memory
+        type='SimpleFixedMultiScaleVFE',  # Use new fixed multi-scale implementation
+        
+        # Multi-scale configuration (SAME as adaptive)
+        voxel_scales=[0.05, 0.1, 0.2],  # Fixed scales (non-learnable)
+        num_scales=3,
+        
+        # Match adaptive config exactly
+        vfe_channels=[32, 64],  # Same as adaptive
+        fusion_channels=64,     # Same as adaptive
+        output_channels=3,      # Same as adaptive
+        
+        # Standard VFE parameters (SAME as adaptive)
+        max_num_points=5,
+        max_voxels=(16000, 40000),
         point_cloud_range=point_cloud_range,
-        vfe_channels=[16, 32],  # Reduced from [32, 64] to save memory
-        fusion_channels=64,  # Reduced from 128 to save memory
-        output_channels=32,  # Reduced from 64 to save memory
-        with_distance=True,
-        with_cluster_center=True,
-        with_voxel_center=True,
-        # Gumbel-Softmax fusion parameters
-        use_gumbel_fusion=True,  # Enable learnable weighted fusion
-        gumbel_temperature=2.0,  # Initial temperature
-        temperature_decay=0.995,  # Decay rate
-        min_temperature=0.5      # Minimum temperature
+        
+        # Fixed assignment strategy
+        assignment_strategy='uniform',  # Options: 'uniform', 'round_robin', 'distance_based'
+        
+        # Standard parameters
+        norm_cfg=dict(type='BN1d', eps=1e-3, momentum=0.01),
     ),
     middle_encoder=dict(
         type='SparseEncoder',
-        in_channels=32,  # Match our reduced VFE output channels
+        in_channels=4,  # Match adaptive config (3+1 scale info)
         sparse_shape=[41, 1600, 1408],
         order=('conv', 'norm', 'act'),
         norm_cfg=dict(type='BN1d', eps=1e-3, momentum=0.01),
@@ -50,7 +55,7 @@ model = dict(
             reshape_out=True)),
     train_cfg=dict(
         _delete_=True,
-        max_epochs=5,
+        max_epochs=2,
         assigner=dict(
             type='Max3DIoUAssigner',
             iou_calculator=dict(type='BboxOverlapsNearest3D'),
@@ -62,24 +67,18 @@ model = dict(
         pos_weight=-1,
         debug=False))
 
-# Enhanced optimizer configuration for Gumbel-Softmax training
+# Enhanced optimizer configuration (Match proven working config)
 optim_wrapper = dict(
-    type='OptimWrapper',  # Use standard optimizer (no mixed precision for now)
-    optimizer=dict(type='AdamW', lr=0.0001, weight_decay=0.01),  # Reduced LR due to smaller batch
+    type='AmpOptimWrapper',  # Re-enable mixed precision (HardVFE supports it)
+    optimizer=dict(type='AdamW', lr=0.001, weight_decay=0.01),  # Match adaptive config
     clip_grad=dict(max_norm=10, norm_type=2),
-    # Special learning rates for Gumbel-Softmax components
-    paramwise_cfg=dict(
-        custom_keys={
-            'temperature': dict(lr_mult=0.1),  # Lower learning rate for temperature
-            'scale_weight_net': dict(lr_mult=0.5),  # Moderate learning for scale predictor
-        })
 )
 
-# Memory-efficient training settings
+# Memory-efficient training settings (Match other baselines)
 train_dataloader = dict(
-    batch_size=2,  # Reduced batch size for memory efficiency
-    num_workers=2,  # Reduced workers
-    persistent_workers=True
+    batch_size=4,  # Match other baselines for fair comparison
+    num_workers=2,  # Standard workers
+    persistent_workers=True  # Enable for efficiency
 )
 
 val_dataloader = dict(
@@ -92,7 +91,7 @@ val_dataloader = dict(
 train_cfg = dict(
     _delete_=True,  # Delete the base config
     type='EpochBasedTrainLoop',
-    max_epochs=3,  # Reduced epochs for testing
+    max_epochs=2,  # Match other baselines for fair comparison
     val_interval=1
 )
 

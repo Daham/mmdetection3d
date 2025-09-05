@@ -17,10 +17,14 @@ from .fixed_multi_scale_vfe import (FixedMultiScaleVFE,
                                      FixedMultiScaleVoxelizer,
                                      FixedMultiScaleFeatureFusion)
 
+# 🆕 Fixed Multi-Scale VFE (clean baseline implementation)
+from .fixed_multiscale_vfe import SimpleFixedMultiScaleVFE
+
 __all__ = [
     'DynamicPillarFeatureNet', 'PillarFeatureNet', 'DynamicSimpleVFE', 'DynamicVFE', 
     'HardSimpleVFE', 'HardVFE', 'SegVFE',
     'ImportanceGuidedMultiScaleVFE', 'ScaleNet', 'MultiScaleVoxelizer', 
     'ScaleSpecificVFE', 'RefactoredMultiScaleFeatureFusion', 'LightweightPointImportanceNet',
-    'FixedMultiScaleVFE', 'FixedScaleVFE', 'FixedMultiScaleVoxelizer', 'FixedMultiScaleFeatureFusion'
+    'FixedMultiScaleVFE', 'FixedScaleVFE', 'FixedMultiScaleVoxelizer', 'FixedMultiScaleFeatureFusion',
+    'SimpleFixedMultiScaleVFE'  # Clean fixed multi-scale VFE implementation
 ]
