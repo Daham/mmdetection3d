@@ -650,20 +650,32 @@ class MultiScaleVoxelizer(nn.Module):
         self.max_voxels = max_voxels
         self.point_cloud_range = point_cloud_range
         
-    def forward(self, points: torch.Tensor, scale_assignment: torch.Tensor) -> List[Dict]:
+    def forward(self, points: torch.Tensor, scale_assignment: torch.Tensor,
+                dynamic_scales: torch.Tensor) -> List[Dict]:
         """
         Group points into voxels at multiple scales.
         
         Args:
             points: (N, 4) - point cloud
             scale_assignment: (N, num_scales) - soft scale assignment
+            dynamic_scales: (num_scales,) - Learnable scale parameters (REQUIRED)
             
         Returns:
             List of voxelization results for each scale
         """
+        # 🎓 PhD FIX: Always use dynamic learnable scales
+        scales_to_use = dynamic_scales
+        
         voxel_outputs = []
         
-        for scale_id, voxel_size in enumerate(self.voxel_scales):
+        # 🎓 PhD FIX: Changed from enumerate to range loop to handle learnable tensor
+        for scale_id in range(len(scales_to_use)):
+            # 🎓 PhD FIX: Extract voxel size (handle both tensor and list)
+            if torch.is_tensor(scales_to_use):
+                voxel_size = scales_to_use[scale_id].item()
+            else:
+                voxel_size = scales_to_use[scale_id]
+            
             # Get soft assignment weights for this scale
             scale_weights = scale_assignment[:, scale_id]  # (N,)
             
@@ -1072,7 +1084,12 @@ class ImportanceGuidedMultiScaleVFE(nn.Module):
             scale_assignment, predicted_scales = self.scale_net(points, self.training)
             
             # 3. Multi-scale voxelization
-            multi_scale_voxels = self.multi_scale_voxelizer(points, scale_assignment)
+            # 🎓 PhD FIX: Pass learnable scales to voxelizer
+            multi_scale_voxels = self.multi_scale_voxelizer(
+                points, 
+                scale_assignment,
+                dynamic_scales=self.scale_net.voxel_scales
+            )
             
             # 4. Scale-specific VFE processing
             multi_scale_features = []
@@ -1121,7 +1138,12 @@ class ImportanceGuidedMultiScaleVFE(nn.Module):
             
             # Process with adaptive voxelization
             scale_assignment, predicted_scales = self.scale_net(representative_points, self.training)
-            multi_scale_voxels = self.multi_scale_voxelizer(representative_points, scale_assignment)
+            # 🎓 PhD FIX: Pass learnable scales to voxelizer
+            multi_scale_voxels = self.multi_scale_voxelizer(
+                representative_points, 
+                scale_assignment,
+                dynamic_scales=self.scale_net.voxel_scales
+            )
             
             # Process each scale
             multi_scale_features = []
@@ -1474,7 +1496,12 @@ class MemoryOptimizedImportanceGuidedMultiScaleVFE(nn.Module):
                 print(f"📊 Predicted scale range: {predicted_scales.min():.4f}m - {predicted_scales.max():.4f}m")
             
             # 🚀 STEP 3: Memory-efficient multi-scale voxelization
-            multi_scale_voxels = self.multi_scale_voxelizer(filtered_points, scale_assignment)
+            # 🎓 PhD FIX: Pass learnable scales to voxelizer
+            multi_scale_voxels = self.multi_scale_voxelizer(
+                filtered_points, 
+                scale_assignment,
+                dynamic_scales=self.scale_net.voxel_scales
+            )
             
             # Track total voxels for memory monitoring
             total_voxels = sum(voxel_data['voxels'].shape[0] for voxel_data in multi_scale_voxels)
@@ -1555,7 +1582,12 @@ class MemoryOptimizedImportanceGuidedMultiScaleVFE(nn.Module):
             
             # Apply memory-efficient processing
             scale_assignment, predicted_scales = self.scale_net(representative_points, self.training)
-            multi_scale_voxels = self.multi_scale_voxelizer(representative_points, scale_assignment)
+            # 🎓 PhD FIX: Pass learnable scales to voxelizer
+            multi_scale_voxels = self.multi_scale_voxelizer(
+                representative_points, 
+                scale_assignment,
+                dynamic_scales=self.scale_net.voxel_scales
+            )
             
             # Process with memory efficiency
             multi_scale_features = []
