@@ -70,11 +70,19 @@ optim_wrapper = dict(
 train_cfg = dict(
     _delete_=True,  # Delete the base config
     type='EpochBasedTrainLoop',
-    max_epochs=2,
+    max_epochs=5,  # 🎓 5 epochs for proper convergence analysis
     val_interval=1
 )
 
 default_hooks = dict(
-    logger=dict(interval=50, type='LoggerHook'),
+    logger=dict(interval=20, type='LoggerHook'),  # More frequent logging
     checkpoint=dict(interval=1, type='CheckpointHook'),
 )
+
+# 📊 CUSTOM HOOKS: Log voxel scale parameters for reviewer proof
+custom_hooks = [
+    # Log θ values in training log lines (same line as loss)
+    dict(type='VoxelScaleLoggerHook', interval=20, log_grad=True),
+    # Log to CSV for plotting graphs
+    dict(type='VoxelScaleCSVLoggerHook', log_file='/tmp/voxel_scale_gradients.csv', interval=1),
+]

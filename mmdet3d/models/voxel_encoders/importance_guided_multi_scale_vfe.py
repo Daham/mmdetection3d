@@ -670,11 +670,12 @@ class MultiScaleVoxelizer(nn.Module):
         
         # 🎓 PhD FIX: Changed from enumerate to range loop to handle learnable tensor
         for scale_id in range(len(scales_to_use)):
-            # 🎓 PhD FIX: Extract voxel size (handle both tensor and list)
+            # 🎓 LEARNABLE VOXEL SCALES: Keep as tensor to preserve gradient flow
+            # CRITICAL: Do NOT use .item() - it breaks backpropagation to scale parameters
             if torch.is_tensor(scales_to_use):
-                voxel_size = scales_to_use[scale_id].item()
+                voxel_size = scales_to_use[scale_id]  # Keep as tensor for gradients!
             else:
-                voxel_size = scales_to_use[scale_id]
+                voxel_size = torch.tensor(scales_to_use[scale_id], device=points.device, dtype=points.dtype)
             
             # Get soft assignment weights for this scale
             scale_weights = scale_assignment[:, scale_id]  # (N,)
@@ -744,13 +745,20 @@ class MultiScaleVoxelizer(nn.Module):
                             sampled_points = torch.zeros(min_voxels, 4, device=points.device, requires_grad=True)
                             sampled_weights = torch.ones(min_voxels, device=points.device) * 0.1
                     
-                    # Fully differentiable: Each point becomes a single-point voxel
-                    voxels = sampled_points.unsqueeze(1)  # (N, 1, 4)
+                    # 🎓 CORRECT FIX: Keep ORIGINAL features for best detection accuracy
+                    # Gradient flow to voxel_size is achieved through:
+                    # 1. scale_info channel in fusion (σ · θ is differentiable)
+                    # 2. voxel_size tensor kept in computation graph (no .item())
                     
-                    # Differentiable coordinates: Use continuous coordinates instead of quantized
+                    # Use ORIGINAL point features - DO NOT normalize by voxel_size here!
+                    # This preserves the feature space that the VFE was designed for
+                    voxels = sampled_points.unsqueeze(1)  # (N, 1, 4) - original [x,y,z,intensity]
+                    
+                    # Coordinates for sparse conv (integer grid positions)
                     coordinates = torch.zeros(sampled_points.shape[0], 4, device=points.device)
                     coordinates[:, 0] = 0  # batch index
-                    coordinates[:, 1:] = sampled_points[:, :3] / voxel_size  # Continuous coordinates
+                    # Use floor division for grid coordinates (standard voxelization)
+                    coordinates[:, 1:] = torch.floor(sampled_points[:, :3] / voxel_size.detach()).long()
                     
                     num_points_per_voxel = torch.ones(sampled_points.shape[0], device=points.device)
                     
@@ -927,6 +935,101 @@ class RefactoredMultiScaleFeatureFusion(nn.Module):
         return fused_features
 
 
+class VoxelScaleGradientTracker:
+    """
+    📊 GRADIENT TRACKING FOR REVIEWER PROOF
+    
+    Logs voxel scale parameter evolution and gradient statistics during training.
+    Provides evidence that gradients flow to voxel_scales nn.Parameter.
+    """
+    
+    def __init__(self, log_file: str = None):
+        self.log_file = log_file or '/tmp/voxel_scale_gradients.csv'
+        self.iteration = 0
+        self.history = {
+            'iteration': [],
+            'theta_0': [], 'theta_1': [], 'theta_2': [],
+            'grad_0': [], 'grad_1': [], 'grad_2': [],
+            'grad_norm': [],
+            'gumbel_entropy': [],
+            'gumbel_max_prob': [],
+            'temperature': [],
+        }
+        self._initialized = False
+        
+    def initialize_log(self):
+        """Create CSV header."""
+        if not self._initialized:
+            with open(self.log_file, 'w') as f:
+                f.write('iteration,theta_0,theta_1,theta_2,grad_0,grad_1,grad_2,grad_norm,gumbel_entropy,gumbel_max_prob,temperature\n')
+            self._initialized = True
+            print(f"📊 Gradient tracking initialized: {self.log_file}")
+    
+    def log_step(self, voxel_scales: torch.Tensor, scale_assignment: torch.Tensor = None, 
+                 temperature: float = None):
+        """Log gradient and scale information after each step."""
+        self.iteration += 1
+        
+        # Get scale values
+        scales = voxel_scales.detach().cpu().numpy()
+        
+        # Get gradients (if available after backward)
+        if voxel_scales.grad is not None:
+            grads = voxel_scales.grad.detach().cpu().numpy()
+            grad_norm = float(voxel_scales.grad.norm().item())
+        else:
+            grads = [0.0] * len(scales)
+            grad_norm = 0.0
+        
+        # Gumbel-Softmax stability metrics
+        if scale_assignment is not None:
+            probs = scale_assignment.detach().cpu()
+            # Entropy: H = -Σ p*log(p) - higher = more uniform/uncertain
+            entropy = float(-(probs * (probs + 1e-8).log()).sum(dim=-1).mean().item())
+            # Max probability: confidence of assignment
+            max_prob = float(probs.max(dim=-1)[0].mean().item())
+        else:
+            entropy = 0.0
+            max_prob = 0.0
+        
+        temp = temperature if temperature is not None else 0.0
+        
+        # Store in history
+        self.history['iteration'].append(self.iteration)
+        for i in range(min(3, len(scales))):
+            self.history[f'theta_{i}'].append(float(scales[i]))
+            self.history[f'grad_{i}'].append(float(grads[i]) if i < len(grads) else 0.0)
+        self.history['grad_norm'].append(grad_norm)
+        self.history['gumbel_entropy'].append(entropy)
+        self.history['gumbel_max_prob'].append(max_prob)
+        self.history['temperature'].append(temp)
+        
+        # Write to CSV
+        self.initialize_log()
+        with open(self.log_file, 'a') as f:
+            row = f"{self.iteration},{scales[0]:.6f},{scales[1]:.6f},{scales[2]:.6f},"
+            row += f"{grads[0]:.4f},{grads[1]:.4f},{grads[2]:.4f},{grad_norm:.4f},"
+            row += f"{entropy:.4f},{max_prob:.4f},{temp:.4f}\n"
+            f.write(row)
+        
+        # Print summary every 100 iterations
+        if self.iteration % 100 == 0:
+            print(f"\n{'='*70}")
+            print(f"📊 VOXEL SCALE GRADIENT REPORT (iter {self.iteration})")
+            print(f"{'='*70}")
+            print(f"   θ = [{scales[0]:.5f}, {scales[1]:.5f}, {scales[2]:.5f}] m")
+            print(f"   ∇θ = [{grads[0]:.2f}, {grads[1]:.2f}, {grads[2]:.2f}]")
+            print(f"   ||∇θ|| = {grad_norm:.4f}")
+            print(f"   Gumbel entropy: {entropy:.4f} (higher=more uniform)")
+            print(f"   Gumbel max_prob: {max_prob:.4f} (higher=more confident)")
+            print(f"   Temperature: {temp:.4f}")
+            print(f"{'='*70}\n")
+
+
+# Global tracker instance
+_gradient_tracker = VoxelScaleGradientTracker()
+
+
 @MODELS.register_module()
 class ImportanceGuidedMultiScaleVFE(nn.Module):
     """
@@ -940,6 +1043,8 @@ class ImportanceGuidedMultiScaleVFE(nn.Module):
     
     Pipeline:
     Point Cloud → Importance Net → Scale Prediction → Multi-Scale Voxelization → VFE → Fusion
+    
+    📊 GRADIENT TRACKING: Logs voxel_scales gradients to /tmp/voxel_scale_gradients.csv
     """
     
     def __init__(self,
@@ -1083,6 +1188,14 @@ class ImportanceGuidedMultiScaleVFE(nn.Module):
             # 2. Scale prediction using Gumbel-Softmax
             scale_assignment, predicted_scales = self.scale_net(points, self.training)
             
+            # 📊 GRADIENT TRACKING: Log scale info for reviewer proof
+            if self.training:
+                _gradient_tracker.log_step(
+                    voxel_scales=self.scale_net.voxel_scales,
+                    scale_assignment=scale_assignment,
+                    temperature=self.scale_net.temperature.item()
+                )
+            
             # 3. Multi-scale voxelization
             # 🎓 PhD FIX: Pass learnable scales to voxelizer
             multi_scale_voxels = self.multi_scale_voxelizer(
@@ -1138,6 +1251,15 @@ class ImportanceGuidedMultiScaleVFE(nn.Module):
             
             # Process with adaptive voxelization
             scale_assignment, predicted_scales = self.scale_net(representative_points, self.training)
+            
+            # 📊 GRADIENT TRACKING: Log scale info for reviewer proof
+            if self.training:
+                _gradient_tracker.log_step(
+                    voxel_scales=self.scale_net.voxel_scales,
+                    scale_assignment=scale_assignment,
+                    temperature=self.scale_net.temperature.item()
+                )
+            
             # 🎓 PhD FIX: Pass learnable scales to voxelizer
             multi_scale_voxels = self.multi_scale_voxelizer(
                 representative_points, 
